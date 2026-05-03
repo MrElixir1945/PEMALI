@@ -30,7 +30,11 @@ class TriggerRequest(BaseModel):
 
 # --- Endpoints ---
 @app.get("/")
-async def serve_frontend():
+async def serve_landing():
+    return FileResponse("static/landing.html")
+
+@app.get("/dashboard")
+async def serve_dashboard():
     return FileResponse("static/index.html")
 
 @app.get("/tools", response_model=List[Dict[str, Any]])
