@@ -11,7 +11,7 @@ API_BASE = "http://localhost:8000"
 OPENROUTER_KEY = "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"
 
 class PemaliOrchestrator:
-    def __init__(self, session_id: str, model: str = "deepseek/deepseek-chat"):
+    def __init__(self, session_id: str, model: str = "deepseek/deepseek-v4-flash"):
         self.session_id = session_id
         self.model = model
         self.headers = {
