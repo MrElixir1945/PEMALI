@@ -31,7 +31,7 @@ class SatelliteIntelligenceModule(PemaliModule):
             raw_data = {
                 "location": location,
                 "satellite": "Sentinel-2",
-                "image_url": f"https://api.satellites.mock/{location.lower().replace(' ', '_')}/latest.png",
+                "image_url": "https://images.unsplash.com/photo-1590487988256-9ed24133863e?q=80&w=600&auto=format&fit=crop", # Example satellite view from Unsplash
                 "resolution": "10m",
                 "cloud_cover": "5%"
             }

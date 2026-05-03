@@ -31,10 +31,17 @@ python worker.py
 ```
 *(Biarkan terminal ini tetap menyala)*
 
-### Terminal 3: Dashboard Command Center
-Dashboard interaktif berbasis CLI untuk memantau log reasoning AI Agent, status task, dan hasil audit.
+### Terminal 3a: Dashboard Command Center (Debugging CLI)
+Dashboard interaktif berbasis CLI (Terminal) untuk memantau log reasoning secara mentah (berguna untuk proses *debugging*).
 ```bash
 python dashboard.py
+```
+*(Biarkan terminal ini tetap menyala untuk monitoring text-based)*
+
+### Terminal 3b: Web Dashboard (Presentasi Juri)
+Dashboard visual interaktif berbasis Web (Streamlit) yang menampilkan UI elegan dengan citra satelit, status kesehatan, dan panel chat interaktif.
+```bash
+streamlit run streamlit_app.py
 ```
 *(Biarkan terminal ini tetap menyala untuk monitoring)*
 
