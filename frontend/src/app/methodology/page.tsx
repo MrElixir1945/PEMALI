@@ -12,57 +12,57 @@ export default function MethodologyPage() {
   return (
     <>
       <NavBar />
-      <main className="flex-1 max-w-4xl mx-auto px-8 py-16 w-full">
+      <main className="flex-1 max-w-4xl mx-auto px-8 py-16 w-full text-stone-800">
         <div className="prose prose-stone max-w-none">
-          <h1 className="font-serif text-5xl font-semibold mb-8">Cara Kerja Kami</h1>
+          <h1 className="font-serif text-5xl font-semibold mb-8 text-stone-900">Cara Kerja Kami</h1>
           <p className="text-xl text-stone-600 font-light leading-relaxed mb-12">
             PEMALI bekerja seperti detektif digital. Ia tidak hanya melihat data, tapi 'berpikir' untuk menghubungkan temuan satelit dengan kondisi nyata di lapangan.
           </p>
 
           <div className="poleng-divider my-12"></div>
 
-          <h2 className="font-serif text-3xl font-semibold mb-6 italic">Melihat, Berpikir, Melindungi.</h2>
-          <p className="text-lg">
+          <h2 className="font-serif text-3xl font-semibold mb-6 italic text-stone-800">Melihat, Berpikir, Melindungi.</h2>
+          <p className="text-lg text-stone-600 mb-12">
             Sistem kami dirancang agar setiap keputusan yang diambil memiliki alasan yang kuat dan dapat dipertanggungjawabkan.
           </p>
           
           <div className="grid grid-cols-1 gap-8 my-12">
-            <div className="bg-white border border-stone-200 p-8 rounded-2xl shadow-sm">
-              <div className="flex items-start gap-6">
-                <div className="bg-stone-100 w-14 h-14 rounded-2xl flex items-center justify-center shrink-0">
-                  <Eye className="w-7 h-7 text-stone-800" />
+            <div className="bg-white border border-stone-200 p-8 rounded-[2.5rem] shadow-sm">
+              <div className="flex flex-col md:flex-row items-center md:items-start gap-8 text-center md:text-left">
+                <div className="bg-stone-50 w-16 h-16 rounded-3xl flex items-center justify-center shrink-0 border border-stone-100">
+                  <Eye className="w-8 h-8 text-stone-800" />
                 </div>
                 <div>
-                  <h3 className="font-serif text-2xl font-semibold mb-2">1. Melihat dari Langit (Observasi)</h3>
-                  <p className="text-stone-600 leading-relaxed mb-4">
+                  <h3 className="font-serif text-2xl font-semibold mb-3 text-stone-900">1. Melihat dari Langit</h3>
+                  <p className="text-stone-600 leading-relaxed">
                     PEMALI menggunakan mata satelit untuk memantau kesehatan hutan dan lahan di Bali secara langsung dari angkasa. Kami dapat melihat perubahan yang tidak terlihat oleh mata manusia biasa.
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white border border-stone-200 p-8 rounded-2xl shadow-sm">
-              <div className="flex items-start gap-6">
-                <div className="bg-stone-100 w-14 h-14 rounded-2xl flex items-center justify-center shrink-0">
-                  <Brain className="w-7 h-7 text-stone-800" />
+            <div className="bg-white border border-stone-200 p-8 rounded-[2.5rem] shadow-sm">
+              <div className="flex flex-col md:flex-row items-center md:items-start gap-8 text-center md:text-left">
+                <div className="bg-stone-50 w-16 h-16 rounded-3xl flex items-center justify-center shrink-0 border border-stone-100">
+                  <Brain className="w-8 h-8 text-stone-800" />
                 </div>
                 <div>
-                  <h3 className="font-serif text-2xl font-semibold mb-2">2. Menganalisis Masalah (Analisis)</h3>
-                  <p className="text-stone-600 leading-relaxed mb-4">
+                  <h3 className="font-serif text-2xl font-semibold mb-3 text-stone-900">2. Menganalisis Masalah</h3>
+                  <p className="text-stone-600 leading-relaxed">
                     AI akan membandingkan apa yang ia lihat dengan aturan yang berlaku untuk memastikan tidak ada pelanggaran alam. Ia 'menghubungkan titik-titik' data untuk menemukan anomali.
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white border border-stone-200 p-8 rounded-2xl shadow-sm">
-              <div className="flex items-start gap-6">
-                <div className="bg-stone-100 w-14 h-14 rounded-2xl flex items-center justify-center shrink-0">
-                  <FileText className="w-7 h-7 text-stone-800" />
+            <div className="bg-white border border-stone-200 p-8 rounded-[2.5rem] shadow-sm">
+              <div className="flex flex-col md:flex-row items-center md:items-start gap-8 text-center md:text-left">
+                <div className="bg-stone-50 w-16 h-16 rounded-3xl flex items-center justify-center shrink-0 border border-stone-100">
+                  <FileText className="w-8 h-8 text-stone-800" />
                 </div>
                 <div>
-                  <h3 className="font-serif text-2xl font-semibold mb-2">3. Memberikan Laporan (Aksi)</h3>
-                  <p className="text-stone-600 leading-relaxed mb-4">
+                  <h3 className="font-serif text-2xl font-semibold mb-3 text-stone-900">3. Memberikan Laporan</h3>
+                  <p className="text-stone-600 leading-relaxed">
                     Setelah yakin, sistem akan otomatis membuat rangkuman audit yang siap digunakan oleh pihak berwenang. Tidak ada data yang terlewatkan.
                   </p>
                 </div>
@@ -70,14 +70,15 @@ export default function MethodologyPage() {
             </div>
           </div>
 
-          {/* Progressive Disclosure for Technical Details */}
-          <div className="bg-stone-50 rounded-2xl p-8 mb-16 border border-stone-100">
+          <div className="bg-stone-900 rounded-[2.5rem] p-10 mb-20 text-white shadow-xl shadow-stone-200">
             <button 
               onClick={() => setShowTechnical(!showTechnical)}
-              className="w-full flex items-center justify-between text-stone-500 hover:text-stone-900 transition-colors"
+              className="w-full flex items-center justify-between text-white/50 hover:text-white transition-colors"
             >
-              <span className="text-xs font-semibold uppercase tracking-widest">Detail Teknis (ReAct & Sentinel-2)</span>
-              {showTechnical ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Technical Deep Dive</span>
+              <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-white/20">
+                {showTechnical ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </div>
             </button>
             
             <AnimatePresence>
@@ -88,7 +89,7 @@ export default function MethodologyPage() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="pt-8 text-sm text-stone-600 leading-relaxed border-t border-stone-200 mt-6">
+                  <div className="pt-8 text-sm text-stone-300 leading-relaxed border-t border-white/10 mt-6 font-light">
                     Sistem berbasis <strong>ReAct (Reasoning & Acting)</strong>. Setiap audit melalui fase observasi spasial menggunakan integrasi citra satelit <strong>Sentinel-2</strong> untuk mendapatkan data <strong>NDVI</strong> (indeks kesehatan vegetasi) terkini. AI memvalidasi hipotesis kerusakan lingkungan berdasarkan observasi tersebut sebelum melakukan eksekusi manifest modul melalui Unified Tool Interface.
                   </div>
                 </motion.div>
@@ -96,30 +97,30 @@ export default function MethodologyPage() {
             </AnimatePresence>
           </div>
 
-          <h2 className="font-serif text-3xl font-semibold mb-8 text-center">Menjaga Keseimbangan Tradisi</h2>
-          <p className="text-center text-lg mb-12">Kami memastikan teknologi tidak merusak tradisi. Algoritma kami dirancang untuk menjaga keseimbangan sesuai nilai leluhur.</p>
+          <h2 className="font-serif text-3xl font-semibold mb-8 text-center text-stone-900">Menjaga Keseimbangan Tradisi</h2>
+          <p className="text-center text-lg mb-12 text-stone-500 max-w-2xl mx-auto font-light">Kami memastikan teknologi tidak merusak tradisi. Algoritma kami dirancang untuk menjaga keseimbangan sesuai nilai leluhur.</p>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
-            <div className="text-center">
-              <div className="bg-stone-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Heart className="w-6 h-6 text-red-800" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-20">
+            <div className="text-center group">
+              <div className="bg-stone-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 border border-stone-100 group-hover:scale-110 transition-transform">
+                <Heart className="w-6 h-6 text-red-700" />
               </div>
-              <h4 className="font-serif text-lg font-semibold mb-2">Parahyangan</h4>
-              <p className="text-xs text-stone-500">Menjaga kesucian area pura agar tetap terjaga dari pembangunan ilegal.</p>
+              <h4 className="font-serif text-xl font-semibold mb-3 text-stone-800">Parahyangan</h4>
+              <p className="text-xs text-stone-400 leading-relaxed font-light">Menjaga kesucian area pura agar tetap terjaga dari pembangunan ilegal.</p>
             </div>
-            <div className="text-center">
-              <div className="bg-stone-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Scale className="w-6 h-6 text-stone-800" />
+            <div className="text-center group">
+              <div className="bg-stone-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 border border-stone-100 group-hover:scale-110 transition-transform">
+                <Scale className="w-6 h-6 text-stone-600" />
               </div>
-              <h4 className="font-serif text-lg font-semibold mb-2">Pawongan</h4>
-              <p className="text-xs text-stone-500">Menjaga keharmonisan warga dengan memastikan keadilan tata ruang.</p>
+              <h4 className="font-serif text-xl font-semibold mb-3 text-stone-800">Pawongan</h4>
+              <p className="text-xs text-stone-400 leading-relaxed font-light">Menjaga keharmonisan warga dengan memastikan keadilan tata ruang.</p>
             </div>
-            <div className="text-center">
-              <div className="bg-stone-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Shield className="w-6 h-6 text-[#2F4F4F]" />
+            <div className="text-center group">
+              <div className="bg-stone-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 border border-stone-100 group-hover:scale-110 transition-transform">
+                <Shield className="w-6 h-6 text-green-800" />
               </div>
-              <h4 className="font-serif text-lg font-semibold mb-2">Palemahan</h4>
-              <p className="text-xs text-stone-500">Menjaga kelestarian alam agar tetap hijau dan asri untuk masa depan.</p>
+              <h4 className="font-serif text-xl font-semibold mb-3 text-stone-800">Palemahan</h4>
+              <p className="text-xs text-stone-400 leading-relaxed font-light">Menjaga kelestarian alam agar tetap hijau dan asri untuk masa depan.</p>
             </div>
           </div>
         </div>

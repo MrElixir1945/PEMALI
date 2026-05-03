@@ -1,13 +1,25 @@
+import os
+import datetime
 from sqlalchemy import create_engine, Column, String, Integer, JSON, DateTime, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if it exists
+load_dotenv()
 
 # Format: postgresql://user:password@host:port/dbname
-DATABASE_URL = "postgresql://admin:pemalipass@localhost:5432/pemali_db"
+DEFAULT_DB_URL = "postgresql://admin:pemalipass@localhost:5432/pemali_db"
+DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DB_URL)
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+try:
+    engine = create_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+except Exception as e:
+    print(f"[Database] Error creating engine: {e}")
+    engine = None
+    SessionLocal = None
+
 Base = declarative_base()
 
 class AgentMemory(Base):
@@ -43,4 +55,7 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    if engine:
+        Base.metadata.create_all(bind=engine)
+    else:
+        raise Exception("Database engine not initialized. Check DATABASE_URL.")

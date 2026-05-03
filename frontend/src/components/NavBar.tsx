@@ -43,7 +43,7 @@ export default function NavBar() {
       <div>
         <Link
           href="/dashboard"
-          className="bg-stone-900 text-[#FAF9F6] px-5 py-2.5 rounded-sm text-sm font-medium hover:bg-stone-800 transition-all shadow-sm inline-block"
+          className="bg-stone-900 text-[#FAF9F6] px-6 py-2.5 rounded-full text-sm font-medium hover:bg-stone-800 transition-all shadow-sm inline-block"
         >
           Enter Dashboard
         </Link>

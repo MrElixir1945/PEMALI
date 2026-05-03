@@ -19,7 +19,6 @@ class SystemSchedulerModule(PemaliModule):
             }
         }
 
-    # PASTIKAN NAMA DAN INDENTASI BENAR
     async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
         db = SessionLocal()
         try:
@@ -27,7 +26,7 @@ class SystemSchedulerModule(PemaliModule):
             minutes = int(params.get("minutes_from_now", 1))
             intent = str(params.get("intent", "Check again"))
             
-            execution_time = datetime.datetime.utcnow() + datetime.timedelta(minutes=minutes)
+            execution_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes)
             
             new_task = AutonomousTask(
                 execute_at=execution_time,

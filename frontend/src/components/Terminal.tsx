@@ -36,8 +36,8 @@ export default function Terminal() {
   }, []);
 
   return (
-    <div className="bg-[#1A1A1A] rounded-xl border border-stone-800 shadow-2xl overflow-hidden h-[340px] flex flex-col relative">
-      <div className="bg-[#111111] px-4 py-3 flex items-center border-b border-stone-800/50">
+    <div className="bg-[#1A1A1A] rounded-3xl border border-stone-800 shadow-2xl overflow-hidden h-[340px] flex flex-col relative">
+      <div className="bg-[#111111] px-6 py-4 flex items-center border-b border-stone-800/50">
         <div className="flex space-x-1.5">
           <div className="w-2.5 h-2.5 rounded-full bg-stone-600"></div>
           <div className="w-2.5 h-2.5 rounded-full bg-stone-600"></div>
@@ -45,7 +45,7 @@ export default function Terminal() {
         </div>
         <span className="ml-4 text-[10px] font-mono text-stone-500">worker.py — status check</span>
       </div>
-      <div className="p-5 font-mono text-xs text-green-400/90 leading-relaxed overflow-y-auto flex-1">
+      <div className="p-6 font-mono text-xs text-green-400/90 leading-relaxed overflow-y-auto flex-1">
         <div className="text-stone-500 mb-2"># Initializing Agentic Orchestrator...</div>
         <div className="mb-1 text-stone-400">[Registry] Loaded: satellite_intelligence</div>
         <div className="mb-1 text-stone-400">[Registry] Loaded: spatial_verifier</div>
@@ -74,7 +74,7 @@ export default function Terminal() {
                 {data.tasks.slice(0, 3).map((t, idx) => (
                   <div key={idx} className="flex justify-between items-center mb-1">
                     <span className="text-stone-300 truncate max-w-[250px]">{t.intent}</span>
-                    <span className={`px-2 py-0.5 rounded-sm text-[9px] ${
+                    <span className={`px-3 py-0.5 rounded-full text-[9px] font-bold ${
                       t.status === 'completed' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'
                     }`}>
                       {t.status}

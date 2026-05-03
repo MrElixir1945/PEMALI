@@ -1,14 +1,19 @@
 import json
-import requests
+import httpx
 import datetime
+import os
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from core.database import SessionLocal, AgentMemory, AutonomousTask
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Config
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-API_BASE = "http://localhost:8000"
-OPENROUTER_KEY = "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"
+API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "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")
 
 class PemaliOrchestrator:
     def __init__(self, session_id: str, model: str = "deepseek/deepseek-v4-flash"):
@@ -22,12 +27,14 @@ class PemaliOrchestrator:
     def _get_db(self):
         return SessionLocal()
 
-    def _fetch_tools(self) -> List[Dict]:
+    async def _fetch_tools(self) -> List[Dict]:
         """Discovery manifest dari FastAPI."""
         try:
-            res = requests.get(f"{API_BASE}/tools", timeout=5)
-            return [{"type": "function", "function": m} for m in res.json()]
-        except Exception:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(f"{API_BASE}/tools", timeout=5)
+                return [{"type": "function", "function": m} for m in res.json()]
+        except Exception as e:
+            print(f"[Orchestrator] Failed to fetch tools: {e}")
             return []
 
     def _rehydrate(self, db: Session) -> List[Dict]:
@@ -45,7 +52,7 @@ class PemaliOrchestrator:
 
     async def run(self, prompt: Optional[str] = None):
         db = self._get_db()
-        tools = self._fetch_tools()
+        tools = await self._fetch_tools()
         messages = self._rehydrate(db)
 
         if not messages:
@@ -63,29 +70,45 @@ class PemaliOrchestrator:
             self._save(db, "user", prompt)
             messages.append({"role": "user", "content": prompt})
 
-        for _ in range(5): # Max 5 loops
-            payload = {"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"}
-            res = requests.post(OPENROUTER_URL, headers=self.headers, json=payload).json()
-            
-            ai_msg = res['choices'][0]['message']
-            self._save(db, "assistant", ai_msg.get("content") or "")
-            messages.append(ai_msg)
+        async with httpx.AsyncClient() as client:
+            for _ in range(5): # Max 5 loops
+                payload = {"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"}
+                try:
+                    res = await client.post(OPENROUTER_URL, headers=self.headers, json=payload, timeout=30)
+                    res_data = res.json()
+                    
+                    if 'error' in res_data:
+                        print(f"[Orchestrator] OpenRouter Error: {res_data['error']}")
+                        break
+                        
+                    ai_msg = res_data['choices'][0]['message']
+                    self._save(db, "assistant", ai_msg.get("content") or "")
+                    messages.append(ai_msg)
 
-            if not ai_msg.get("tool_calls"):
-                break
+                    if not ai_msg.get("tool_calls"):
+                        break
 
-            for tool in ai_msg["tool_calls"]:
-                t_name = tool["function"]["name"]
-                t_args = json.loads(tool["function"]["arguments"])
-                
-                # Execute via Communicate Layer
-                obs = requests.post(f"{API_BASE}/execute", json={
-                    "session_id": self.session_id,
-                    "tool_name": t_name,
-                    "parameters": t_args
-                }).json()
+                    for tool in ai_msg["tool_calls"]:
+                        t_name = tool["function"]["name"]
+                        t_args = json.loads(tool["function"]["arguments"])
+                        
+                        # Execute via Communicate Layer
+                        obs_res = await client.post(f"{API_BASE}/execute", json={
+                            "session_id": self.session_id,
+                            "tool_name": t_name,
+                            "parameters": t_args
+                        })
+                        obs = obs_res.json()
 
-                messages.append({"role": "tool", "tool_call_id": tool["id"], "name": t_name, "content": json.dumps(obs)})
+                        messages.append({
+                            "role": "tool", 
+                            "tool_call_id": tool["id"], 
+                            "name": t_name, 
+                            "content": json.dumps(obs)
+                        })
+                except Exception as e:
+                    print(f"[Orchestrator] Loop Error: {e}")
+                    break
 
         db.close()
-        return messages[-1]["content"]
+        return messages[-1]["content"] if messages else "No response generated."

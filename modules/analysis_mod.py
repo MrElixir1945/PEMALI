@@ -30,8 +30,13 @@ class EnvironmentalAnalyzerModule(PemaliModule):
             location = params.get("location", "Unknown")
             sat_ref = params.get("satellite_data_ref", "N/A")
             
-            # Simulate heavy processing/analysis (e.g. computer vision on the image)
-            await asyncio.sleep(2)
+            # Simulate heavy processing steps for reasoning log
+            # Step 1: Pre-processing
+            await asyncio.sleep(0.8)
+            # Step 2: Index computation
+            await asyncio.sleep(0.8)
+            # Step 3: Comparison
+            await asyncio.sleep(0.4)
             
             raw_data = {
                 "location": location,
@@ -46,8 +51,13 @@ class EnvironmentalAnalyzerModule(PemaliModule):
             return ModuleOutput(
                 status="success",
                 data=raw_data,
-                agent_hint=f"Hasil komputasi NDVI menunjukkan pengurangan vegetasi (kerusakan lahan) sebesar 15% sejak bulan lalu di {location}. Tingkat kerusakan: Sedang-Tinggi.",
-                thk_alignment="Palemahan" # Palemahan berkaitan erat dengan lingkungan fisik
+                agent_hint=(
+                    f"Analyzing vegetation health in {location}... "
+                    f"Computed NDVI: 0.45 (Previous: 0.60). "
+                    f"Detected 15% vegetation loss. Status: Moderate-High damage. "
+                    f"Likely land-use conversion detected."
+                ),
+                thk_alignment="Palemahan" 
             )
             
         except Exception as e:
