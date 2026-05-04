@@ -5,3 +5,5 @@ sqlalchemy
 requests
 psycopg2-binary
 rich
+chromadb
+sentence-transformers

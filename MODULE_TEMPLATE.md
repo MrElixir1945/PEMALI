@@ -1,81 +1,69 @@
-# Panduan Membuat Modul PEMALI (UTI Standard)
+# Protokol Ekstensi Modul Terpadu PEMALI (Spesifikasi Standar Versi 2)
 
-File ini adalah panduan cepat bagi developer atau kontributor yang ingin menambahkan kemampuan baru (*Tools/Skills*) ke dalam sistem PEMALI AI Agent.
+Harap diperhatikan bahwa arsitektur Sistem PEMALI versi 2 dibangun berlandaskan pada **Pydantic Core** dan manajemen dependensi **Directed Acyclic Graph (DAG)**. Dalam paradigma terbaru ini, modul berfungsi murni sebagai instrumen pengumpul data mentah. Semua bentuk pertimbangan etis terkait pedoman Tri Hita Karana, beserta pengambilan kesimpulan akhir, telah didelegasikan sepenuhnya kepada Cognitive Layer dari Large Language Model (LLM).
 
-Sistem PEMALI menggunakan arsitektur **Auto-Discovery**. Anda **TIDAK PERLU** mengedit file inti (seperti `orchestrator.py` atau `main.py`). Cukup buat satu file Python di dalam folder `/modules/` dan ikuti aturan *Unified Tool Interface* (UTI) di bawah ini.
+## Empat Regulasi Absolut Eksekusi Modul
 
-## 4 Aturan Emas Pembuatan Modul
+1. **Skema Pydantic**: Setiap input data yang diinisiasi oleh AI wajib divalidasi menggunakan instance `BaseModel` dari Pydantic.
+2. **Ketentuan Respons Absolut**: Fungsi `execute` mutlak menghasilkan objek `ModuleOutput` (yang mencakup atribut `status`, `data`, dan `error_msg`). Atribut lama seperti `agent_hint` dan `thk_alignment` telah dihapus dari protokol.
+3. **Rantai Dependensi DAG**: Parameter `depends_on` wajib digunakan jika eksekusi suatu modul membutuhkan penyelesaian modul lain sebelumnya.
+4. **Injeksi Konteks Konkuren**: Parameter `context` wajib digunakan untuk mengakses variabel internal sistem (seperti *environment variables* dan `session_id`), sehingga tidak membebani agen AI.
 
-1. **Turunan `PemaliModule`**: Wajib *inherit* dari `PemaliModule` agar file dikenali oleh *registry* sistem.
-2. **Definisikan `manifest`**: *Property* ini berisi JSON schema untuk mendeskripsikan *tool* ke AI Agent (nama, deskripsi fungsi, parameter yang dibutuhkan).
-3. **Gunakan `async def execute`**: Fungsi utama untuk memproses logika Anda. Wajib bersifat asinkron (`async`).
-4. **Kembalikan `ModuleOutput`**: Fungsi wajib mereturn objek `ModuleOutput` (yang mendefinisikan `status`, `data`, `agent_hint`, dan `thk_alignment`).
+## Kerangka Kerja Komputasi Standar
 
----
-
-## 📝 Boilerplate Template (Copy-Paste Ini)
-
-Buat file baru berakhiran `.py` di dalam folder `/modules/` (misal: `modules/cuaca_mod.py`) dan tempelkan kode berikut:
+File Python (`.py`) untuk modul baru harus ditempatkan di dalam direktori `/modules/` dan wajib mengikuti struktur standar berikut:
 
 ```python
-import asyncio
-from typing import Dict, Any
-from core.base_module import PemaliModule, ModuleOutput
+from typing import Any, Dict
+from pydantic import BaseModel, Field
+from core.base_module import PemaliModuleV2, ModuleOutput
 
-class TemplateModulBaru(PemaliModule):
-    
-    @property
-    def manifest(self) -> Dict[str, Any]:
-        """
-        Metadata untuk memperkenalkan tool ke AI Agent.
-        AI akan membaca ini untuk memutuskan kapan harus memanggil modul Anda.
-        """
-        return {
-            "name": "nama_modul_unik", # WAJIB: Huruf kecil & underscore (snake_case)
-            "description": "Jelaskan dengan SANGAT DETAIL kapan AI harus memakai alat ini dan apa fungsinya.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    # Definisikan parameter input yang Anda inginkan dari AI Agent
-                    "lokasi": {
-                        "type": "string", 
-                        "description": "Nama lokasi yang ingin dicek"
-                    },
-                },
-                "required": ["lokasi"] # Daftar parameter yang wajib diisi AI
-            }
-        }
+# 1. Penetapan Skema Masukan Berbasis Pydantic
+class NamaModulInput(BaseModel):
+    lokasi: str = Field(..., description="Nama lokasi spesifik yang ditargetkan untuk inspeksi.")
+    # Tambahkan parameter lain sesuai kebutuhan dengan tipe data yang ketat
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
-        """Logika Utama Modul Anda"""
+# 2. Deklarasi Kelas Entitas Modul
+class TemplateModulBaru(PemaliModuleV2):
+    # Deklarasi Metadata Modul
+    name = "nama_modul_unik"  # WAJIB: Gunakan format snake_case.
+    description = "Penjelasan komprehensif mengenai fungsi dan kapan AI harus menggunakan modul ini."
+    input_schema = NamaModulInput
+    depends_on = []  # Daftar modul prasyarat. Contoh: ["satellite_mod"]
+
+    async def execute(self, params: NamaModulInput, context: Dict[str, Any]) -> ModuleOutput:
+        """Logika Operasional Utama Modul"""
         try:
-            # 1. Ambil argumen/input yang diberikan oleh AI Agent
-            lokasi = params.get("lokasi", "Tidak diketahui")
+            # 1. Ekstraksi parameter input dari agen dan variabel sistem internal
+            lokasi = params.lokasi
+            session_id = context.get("session_id", "unknown")
             
-            # 2. TULIS LOGIKA KERJA DI SINI
-            # Contoh: Panggil API eksternal, scrape web, atau hitung matematika
-            # await asyncio.sleep(1) # Simulasi I/O
-            hasil_mentah = {"lokasi": lokasi, "status_cuaca": "Hujan deras"}
+            # 2. IMPLEMENTASI LOGIKA KOMPUTASI
+            # (Contoh: pemanggilan API, query database, atau web scraping)
+            hasil_mentah = {
+                "lokasi": lokasi,
+                "indikator": 85.5
+            }
             
-            # 3. Kembalikan output sesuai standar UTI
+            # 3. Pengembalian data mentah murni tanpa analisis tambahan
             return ModuleOutput(
-                status="success",
-                data=hasil_mentah, # Data mentah untuk disimpan ke database
-                agent_hint=f"Cuaca di {lokasi} saat ini hujan deras. Sarankan untuk menunda aktivitas luar ruangan.", # Hint manusiawi agar AI paham
-                thk_alignment="Palemahan" # Pilih: Parahyangan / Pawongan / Palemahan
+                status=200, 
+                data=hasil_mentah
             )
             
         except Exception as e:
-            # 4. Tangani error agar sistem utama (Orchestrator) tidak ikut crash
+            # 4. Manajemen error; evaluasi pemulihan akan ditangani oleh Cognitive Layer
             return ModuleOutput(
-                status="error", 
-                data={"error_detail": str(e)}, 
-                agent_hint="Gagal mengambil data cuaca karena terjadi kesalahan internal server.",
-                thk_alignment="Netral"
+                status=500, 
+                error_msg=str(e)
             )
 ```
 
-## Penjelasan `ModuleOutput` (Sangat Penting!)
-*   **`data`**: *Payload* teknis murni (JSON/Dict). Ini akan disimpan ke database (*State Manager*). **AI Agent tidak akan membaca bagian ini secara langsung** untuk menghemat token.
-*   **`agent_hint`**: Kesimpulan singkat (*human-readable*). **Ini yang dibaca oleh AI Agent**. Jadikan ini seperti pesan dari sistem ke AI.
-*   **`thk_alignment`**: Analisis wajib terkait filosofi *Tri Hita Karana*. Parameter ini krusial untuk pelaporan kebijakan.
+## Penjelasan Komponen Arsitektur Versi 2
+
+- **`input_schema`**: Berfungsi sebagai mekanisme validasi otonom. Jika terdapat ketidaksesuaian tipe data pada input dari AI (misalnya, mengirim *integer* saat sistem meminta *string*), sistem akan otomatis menolak permintaan sebelum fungsi `execute` dijalankan.
+- **`depends_on`**: Berupa array string. Jika modul membutuhkan data dari modul lain (misal: data satelit), deklarasikan sebagai `["satellite_mod"]`. Eksekusi modul ini akan ditahan hingga modul prasyarat selesai dengan status 200.
+- **`ModuleOutput`**:
+  - **`status`**: Menggunakan standar kode status HTTP (200 untuk sukses, 400 untuk error pada input, dan 500 untuk kegagalan internal sistem).
+  - **`data`**: Payload teknis murni yang akan dikirimkan langsung ke *context window* LLM.
+  - **`error_msg`**: Pesan error eksplisit untuk memfasilitasi proses pemulihan (Self-Correction Layer) oleh AI.
