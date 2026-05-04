@@ -46,6 +46,11 @@ class SystemSchedulerModule(PemaliModule):
             )
         except Exception as e:
             print(f"[Scheduler] Error: {e}")
-            return ModuleOutput(status="error", data={"error": str(e)}, agent_hint="Gagal menjadwalkan.")
+            return ModuleOutput(
+                status="error",
+                data={"error": str(e)},
+                agent_hint="Gagal menjadwalkan tugas otonom. Periksa koneksi database.",
+                thk_alignment="Netral"
+            )
         finally:
             db.close()

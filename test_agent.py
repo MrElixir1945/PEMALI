@@ -3,7 +3,7 @@ from core.orchestrator import PemaliOrchestrator
 
 async def main():
     # 1. Tentukan session_id unik untuk audit ini
-    session_id = "audit-ubud-001"
+    session_id = "audit-ubud-004"
     
     # 2. Inisialisasi Orchestrator (The Brain)
     # Pastikan model name sesuai dengan yang tersedia di OpenRouter
