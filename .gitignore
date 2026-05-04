@@ -21,3 +21,5 @@ Thumbs.db
 # PEMALI Specific
 *.log
 data/
+chroma_db/
+scratch/
