@@ -21,7 +21,7 @@ class PemaliModule(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         """
         Fungsi utama modul.
         Harus bersifat asynchronous dan mengembalikan tipe ModuleOutput.

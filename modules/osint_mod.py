@@ -21,7 +21,7 @@ class SpatialVerifierModule(PemaliModule):
             }
         }
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         try:
             location = params.get("location", "Unknown")
             

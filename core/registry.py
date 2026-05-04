@@ -42,12 +42,12 @@ class ModuleRegistry:
         """Return array of JSON Schema untuk LLM Tool Calling context."""
         return [tool.manifest for tool in self.tools.values()]
 
-    async def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute_tool(self, tool_name: str, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         """Dispatcher request ke module yang di-load."""
         if tool_name not in self.tools:
             raise ValueError(f"Tool '{tool_name}' not registered.")
         
-        return await self.tools[tool_name].execute(params)
+        return await self.tools[tool_name].execute(params, session_id=session_id)
 
 # Export singleton
 registry = ModuleRegistry()

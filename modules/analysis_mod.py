@@ -25,7 +25,7 @@ class EnvironmentalAnalyzerModule(PemaliModule):
             }
         }
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         try:
             location = params.get("location", "Unknown")
             sat_ref = params.get("satellite_data_ref", "N/A")

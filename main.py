@@ -19,6 +19,7 @@ app = FastAPI(title="PEMALI Communicate Layer", version="1.2")
 class ToolCallRequest(BaseModel):
     tool_name: str
     parameters: Dict[str, Any]
+    session_id: Optional[str] = None
 
 class TriggerRequest(BaseModel):
     prompt: str
@@ -44,7 +45,11 @@ async def get_available_tools():
 async def execute_agent_tool(request: ToolCallRequest):
     """Execution endpoint for Agent tool calls."""
     try:
-        result = await registry.execute_tool(request.tool_name, request.parameters)
+        result = await registry.execute_tool(
+            request.tool_name, 
+            request.parameters, 
+            session_id=request.session_id
+        )
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -72,15 +77,23 @@ async def get_system_status():
         
         # Fetch Recent Audits
         recent_audits = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(10).all()
-        audits_list = [
-            {
+        audits_list = []
+        for a in recent_audits:
+            # Ambil pesan pertama user untuk judul history
+            first_msg = db.query(AgentMemory).filter(
+                AgentMemory.session_id == a.session_id,
+                AgentMemory.role == "user"
+            ).order_by(AgentMemory.created_at.asc()).first()
+            
+            title = first_msg.content[:40] + "..." if first_msg and len(first_msg.content) > 40 else (first_msg.content if first_msg else a.issue_type)
+
+            audits_list.append({
                 "id": a.id, 
                 "location": a.location, 
-                "issue": a.issue_type, 
+                "issue": title, 
                 "thk": a.thk_alignment,
                 "timestamp": a.created_at.isoformat()
-            } for a in recent_audits
-        ]
+            })
         
         return {
             "fastapi_active": True,
@@ -104,7 +117,7 @@ async def get_system_status():
             db.close()
 
 @app.get("/api/session")
-async def get_session_data():
+async def get_session_data(session_id: Optional[str] = None):
     """Returns data for the interaction history."""
     db = None
     try:
@@ -112,9 +125,12 @@ async def get_session_data():
         if not db:
             return {"session_id": None, "error": "Database session failed"}
             
-        # 1. Fetch Latest Session ID
-        latest_mem = db.query(AgentMemory).order_by(AgentMemory.id.desc()).first()
-        target_session = latest_mem.session_id if latest_mem else None
+        # 1. Determine Target Session
+        if session_id:
+            target_session = session_id
+        else:
+            latest_mem = db.query(AgentMemory).order_by(AgentMemory.id.desc()).first()
+            target_session = latest_mem.session_id if latest_mem else None
         
         if not target_session:
             return {"session_id": None}
@@ -122,8 +138,11 @@ async def get_session_data():
         memories = db.query(AgentMemory).filter(AgentMemory.session_id == target_session).order_by(AgentMemory.id.asc()).all()
         mem_list = [{"id": m.id, "role": m.role, "content": m.content, "name": m.name} for m in memories]
         
-        # Check if audit exists
-        latest_log = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+        # Check if audit exists for this session
+        latest_log = db.query(AuditLog).filter(AuditLog.session_id == target_session).first()
+        # Fallback to latest if not found and it's the latest session (optional, but safer)
+        if not latest_log and not session_id:
+             latest_log = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
         audit_data = None
         if latest_log:
             # Simulate NDVI scores for the UI

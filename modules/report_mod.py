@@ -20,10 +20,11 @@ class ReportWriterModule(PemaliModule):
             }
         }
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         db = SessionLocal()
         try:
             new_log = AuditLog(
+                session_id=session_id,
                 location=params["location"],
                 issue_type=params["issue_type"],
                 narrative_report=params["narrative_report"],

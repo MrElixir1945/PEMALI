@@ -19,7 +19,7 @@ class SystemSchedulerModule(PemaliModule):
             }
         }
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         db = SessionLocal()
         try:
             # Proteksi tipe data agar tidak 400 Bad Request

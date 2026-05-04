@@ -11,14 +11,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Config
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_URL = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 API_BASE = os.getenv("API_BASE", "http://localhost:8000")
-OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "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")
+OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
+
+if not OPENROUTER_KEY:
+    print("[Warning] OPENROUTER_KEY not found in environment variables!")
 
 class PemaliOrchestrator:
-    def __init__(self, session_id: str, model: str = "deepseek/deepseek-v4-flash"):
+    def __init__(self, session_id: str, model: str = None):
         self.session_id = session_id
-        self.model = model
+        self.model = model or OPENROUTER_MODEL
+        print(f"[Orchestrator] Active Session: {self.session_id} | Model: {self.model}")
         self.headers = {
             "Authorization": f"Bearer {OPENROUTER_KEY}",
             "Content-Type": "application/json"
@@ -74,14 +79,21 @@ class PemaliOrchestrator:
             for _ in range(5): # Max 5 loops
                 payload = {"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"}
                 try:
-                    res = await client.post(OPENROUTER_URL, headers=self.headers, json=payload, timeout=30)
+                    print(f"[Orchestrator] Requesting LLM ({self.model})...")
+                    res = await client.post(OPENROUTER_URL, headers=self.headers, json=payload, timeout=60)
+                    print(f"[Orchestrator] HTTP {res.status_code}")
                     res_data = res.json()
                     
                     if 'error' in res_data:
                         print(f"[Orchestrator] OpenRouter Error: {res_data['error']}")
                         break
                         
+                    if not res_data.get('choices'):
+                        print(f"[Orchestrator] No choices in response: {res_data}")
+                        break
+
                     ai_msg = res_data['choices'][0]['message']
+                    print(f"[Orchestrator] AI Response: {ai_msg.get('content')[:50]}...")
                     self._save(db, "assistant", ai_msg.get("content") or "")
                     messages.append(ai_msg)
 
