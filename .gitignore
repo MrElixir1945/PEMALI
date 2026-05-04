@@ -1,31 +1,23 @@
-# Environments
-venv/
-.env
-.venv/
-env/
-ENV/
-
-# Python Cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
+venv/
+ENV/
+env/
+.env
 
-# Databases
+# Database
 *.sqlite3
-*.sqlite
-pemali_db/
 
-# Logs
-*.log
-logs/
-
-# IDE and OS
+# IDEs
 .vscode/
 .idea/
-.DS_Store
-*.swp
-*.swo
 
-# Project specific
-mock_data/
+# OS
+.DS_Store
+Thumbs.db
+
+# PEMALI Specific
+*.log
+data/

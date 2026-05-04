@@ -20,7 +20,7 @@ if not OPENROUTER_KEY:
     print("[Warning] OPENROUTER_KEY not found in environment variables!")
 
 class PemaliOrchestrator:
-    def __init__(self, session_id: str, model: str = None):
+    def __init__(self, session_id: str, model: str = "google/gemini-2.0-flash-001"):
         self.session_id = session_id
         self.model = model or OPENROUTER_MODEL
         print(f"[Orchestrator] Active Session: {self.session_id} | Model: {self.model}")
@@ -48,7 +48,13 @@ class PemaliOrchestrator:
             AgentMemory.session_id == self.session_id
         ).order_by(AgentMemory.created_at.asc()).all()
         
-        return [{"role": m.role, "content": m.content or "", "name": m.name} for m in memories]
+        result = []
+        for m in memories:
+            msg = {"role": m.role, "content": m.content or ""}
+            if m.name: # Hanya tambahkan field name jika ada isinya
+                msg["name"] = m.name
+            result.append(msg)
+        return result
 
     def _save(self, db: Session, role: str, content: str, name: str = None):
         """Persist step ke DB."""
@@ -64,33 +70,34 @@ class PemaliOrchestrator:
             messages.append({
                 "role": "system", 
                 "content": (
-                    "You are PEMALI AI, an autonomous agent. "
-                    "STRICT RULE: Do not just describe your actions in text. "
-                    "You MUST execute tools (satellite_mod, report_writer, system_scheduler) "
-                    "to complete your tasks. If you need to schedule a follow-up, "
-                    "you MUST call 'system_scheduler' tool. NO EXCEPTIONS."
+                    "You are PEMALI AI, a high-authority autonomous environmental auditor. "
+                    "STRICT RULES:\n"
+                    "1. ALWAYS call 'satellite_audit' and 'osint_intel' for any location requested.\n"
+                    "2. DO NOT make conclusions without data from these tools.\n"
+                    "3. After analysis, use 'report_writer' to persist the findings.\n"
+                    "4. Finally, use 'system_scheduler' if the user requested a follow-up.\n"
+                    "Execution order is crucial: Analysis -> Report -> Schedule."
                 )
             })
         if prompt:
             self._save(db, "user", prompt)
             messages.append({"role": "user", "content": prompt})
 
-        async with httpx.AsyncClient() as client:
-            for _ in range(5): # Max 5 loops
-                payload = {"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"}
-                try:
-                    print(f"[Orchestrator] Requesting LLM ({self.model})...")
-                    res = await client.post(OPENROUTER_URL, headers=self.headers, json=payload, timeout=60)
-                    print(f"[Orchestrator] HTTP {res.status_code}")
-                    res_data = res.json()
-                    
-                    if 'error' in res_data:
-                        print(f"[Orchestrator] OpenRouter Error: {res_data['error']}")
-                        break
-                        
-                    if not res_data.get('choices'):
-                        print(f"[Orchestrator] No choices in response: {res_data}")
-                        break
+        for _ in range(5): # Max 5 loops
+            payload = {"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"}
+            res = requests.post(OPENROUTER_URL, headers=self.headers, json=payload).json()
+            
+            if 'error' in res:
+                print(f"[Orchestrator] API Error: {res['error']}")
+                return f"Error from AI Provider: {res['error'].get('message')}"
+
+            if 'choices' not in res:
+                print(f"[Orchestrator] Unexpected Response: {res}")
+                return "Error: No choices in API response."
+
+            ai_msg = res['choices'][0]['message']
+            self._save(db, "assistant", ai_msg.get("content") or "")
+            messages.append(ai_msg)
 
                     ai_msg = res_data['choices'][0]['message']
                     print(f"[Orchestrator] AI Response: {ai_msg.get('content')[:50]}...")

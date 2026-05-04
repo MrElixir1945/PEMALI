@@ -41,6 +41,11 @@ class ReportWriterModule(PemaliModule):
                 thk_alignment=params["thk_alignment"]
             )
         except Exception as e:
-            return ModuleOutput(status="error", data={"error": str(e)}, agent_hint="Gagal menyimpan laporan.")
+            return ModuleOutput(
+                status="error",
+                data={"error": str(e)},
+                agent_hint="Gagal menyimpan laporan audit ke database. Periksa koneksi PostgreSQL.",
+                thk_alignment="Netral"
+            )
         finally:
             db.close()
