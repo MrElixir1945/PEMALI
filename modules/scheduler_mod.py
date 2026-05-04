@@ -19,15 +19,14 @@ class SystemSchedulerModule(PemaliModule):
             }
         }
 
-    # PASTIKAN NAMA DAN INDENTASI BENAR
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         db = SessionLocal()
         try:
             # Proteksi tipe data agar tidak 400 Bad Request
             minutes = int(params.get("minutes_from_now", 1))
             intent = str(params.get("intent", "Check again"))
             
-            execution_time = datetime.datetime.utcnow() + datetime.timedelta(minutes=minutes)
+            execution_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes)
             
             new_task = AutonomousTask(
                 execute_at=execution_time,

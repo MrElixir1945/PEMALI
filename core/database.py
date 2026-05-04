@@ -1,13 +1,30 @@
+import os
+import datetime
 from sqlalchemy import create_engine, Column, String, Integer, JSON, DateTime, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import datetime
+from dotenv import load_dotenv
 
+# Load environment variables from .env file if it exists
+load_dotenv()
+
+# Database Configuration
 # Format: postgresql://user:password@host:port/dbname
-DATABASE_URL = "postgresql://admin:pemalipass@localhost:5432/pemali_db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+if not DATABASE_URL:
+    # Default for local development if not provided in .env
+    DATABASE_URL = "postgresql://admin:pemalipass@localhost:5432/pemali_db"
+    print(f"[Database] Using default development URL: {DATABASE_URL}")
+
+try:
+    engine = create_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+except Exception as e:
+    print(f"[Database] Error creating engine: {e}")
+    engine = None
+    SessionLocal = None
+
 Base = declarative_base()
 
 class AgentMemory(Base):
@@ -35,6 +52,7 @@ class AuditLog(Base):
     """Final reports and critical observations."""
     __tablename__ = "audit_logs"
     id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True, nullable=True) # Link to agent session
     location = Column(String)
     issue_type = Column(String)
     narrative_report = Column(Text)
@@ -43,4 +61,7 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc))
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    if engine:
+        Base.metadata.create_all(bind=engine)
+    else:
+        raise Exception("Database engine not initialized. Check DATABASE_URL.")

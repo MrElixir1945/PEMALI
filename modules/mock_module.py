@@ -20,7 +20,7 @@ class MockModule(PemaliModule):
             }
         }
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         # Simulate network delay / processing time
         await asyncio.sleep(0.5)
         
