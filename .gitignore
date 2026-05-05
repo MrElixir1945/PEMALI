@@ -24,5 +24,7 @@ postgres_data/
 .DS_Store
 Thumbs.db
 
-# Project Specific
+# PEMALI Specific
 data/
+chroma_db/
+scratch/
