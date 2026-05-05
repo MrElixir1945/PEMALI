@@ -51,7 +51,7 @@ class CommunityEngagementModule(PemaliModule):
             }
         }
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         """
         Menganalisis keterlibatan komunitas lokal dan kondisi sosial-budaya
         di lokasi target dalam kerangka pilar Pawongan Tri Hita Karana.

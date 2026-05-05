@@ -1,133 +1,213 @@
 import json
+import asyncio
 import httpx
 import datetime
 import os
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from core.database import SessionLocal, AgentMemory, AutonomousTask
+from core.database import SessionLocal, AgentMemory, AuditLog
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Config
 OPENROUTER_URL = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 API_BASE = os.getenv("API_BASE", "http://localhost:8000")
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 
 if not OPENROUTER_KEY:
-    print("[Warning] OPENROUTER_KEY not found in environment variables!")
+    print("[Warning] OPENROUTER_KEY not found!")
+
 
 class PemaliOrchestrator:
-    def __init__(self, session_id: str, model: str = "google/gemini-2.0-flash-001"):
+    def __init__(self, session_id: str, model: str = None):
         self.session_id = session_id
         self.model = model or OPENROUTER_MODEL
-        print(f"[Orchestrator] Active Session: {self.session_id} | Model: {self.model}")
+        print(f"[Orchestrator] Session: {self.session_id} | Model: {self.model}")
         self.headers = {
             "Authorization": f"Bearer {OPENROUTER_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://pemali.id",
+            "X-Title": "PEMALI Audit Platform"
         }
 
-    def _get_db(self):
-        return SessionLocal()
-
-    async def _fetch_tools(self) -> List[Dict]:
-        """Discovery manifest dari FastAPI."""
-        try:
-            async with httpx.AsyncClient() as client:
-                res = await client.get(f"{API_BASE}/tools", timeout=5)
-                return [{"type": "function", "function": m} for m in res.json()]
-        except Exception as e:
-            print(f"[Orchestrator] Failed to fetch tools: {e}")
-            return []
-
-    def _rehydrate(self, db: Session) -> List[Dict]:
-        """Tarik history dari DB (Context Recovery)."""
-        memories = db.query(AgentMemory).filter(
-            AgentMemory.session_id == self.session_id
-        ).order_by(AgentMemory.created_at.asc()).all()
-        
-        result = []
-        for m in memories:
-            msg = {"role": m.role, "content": m.content or ""}
-            if m.name: # Hanya tambahkan field name jika ada isinya
-                msg["name"] = m.name
-            result.append(msg)
-        return result
-
     def _save(self, db: Session, role: str, content: str, name: str = None):
-        """Persist step ke DB."""
         db.add(AgentMemory(session_id=self.session_id, role=role, content=content, name=name))
         db.commit()
 
+    async def _run_tool(self, client: httpx.AsyncClient, tool_name: str, params: Dict) -> Dict:
+        """Jalankan satu tool, return hasilnya."""
+        print(f"[Orchestrator] ⚙ Tool: {tool_name}")
+        try:
+            r = await client.post(
+                f"{API_BASE}/execute",
+                json={"session_id": self.session_id, "tool_name": tool_name, "parameters": params},
+                timeout=20
+            )
+            data = r.json()
+            print(f"[Orchestrator] ✓ Done: {tool_name}")
+            return data
+        except Exception as e:
+            print(f"[Orchestrator] ✗ Failed: {tool_name} — {e}")
+            return {"status": "error", "tool": tool_name, "error": str(e)}
+
+    def _save_audit_log(self, db: Session, location: str, issue: str, narrative: str, thk: str):
+        """Langsung simpan AuditLog ke DB."""
+        try:
+            log = AuditLog(
+                session_id=self.session_id,
+                location=location,
+                issue_type=issue,
+                narrative_report=narrative,
+                thk_alignment=thk,
+                metadata_json={"source": "PEMALI_Direct_Pipeline"}
+            )
+            db.add(log)
+            db.commit()
+            print(f"[Orchestrator] ✅ AuditLog saved: id={log.id}")
+            return log.id
+        except Exception as e:
+            print(f"[Orchestrator] ✗ AuditLog save failed: {e}")
+            db.rollback()
+            return None
+
+    def _extract_location(self, prompt: str) -> str:
+        """Simple extraction of location from prompt."""
+        keywords = ["di ", "kawasan ", "wilayah ", "daerah ", "lokasi "]
+        for kw in keywords:
+            if kw in prompt.lower():
+                idx = prompt.lower().index(kw) + len(kw)
+                return prompt[idx:idx+50].strip().rstrip(".,")
+        return prompt[:50]
+
     async def run(self, prompt: Optional[str] = None):
-        db = self._get_db()
-        tools = await self._fetch_tools()
-        messages = self._rehydrate(db)
+        db = SessionLocal()
+        try:
+            # Save user message
+            if prompt:
+                self._save(db, "user", prompt)
+                # Quick ack to user
+                ack = f"Baik, saya akan melakukan audit di lokasi yang disebutkan. Mengumpulkan data satelit dan informasi publik..."
+                self._save(db, "assistant", ack)
 
-        if not messages:
-            messages.append({
-                "role": "system", 
-                "content": (
-                    "You are PEMALI AI, a high-authority autonomous environmental auditor. "
-                    "STRICT RULES:\n"
-                    "1. ALWAYS call 'satellite_audit' and 'osint_intel' for any location requested.\n"
-                    "2. DO NOT make conclusions without data from these tools.\n"
-                    "3. After analysis, use 'report_writer' to persist the findings.\n"
-                    "4. Finally, use 'system_scheduler' if the user requested a follow-up.\n"
-                    "Execution order is crucial: Analysis -> Report -> Schedule."
+            location = self._extract_location(prompt or "Bali")
+
+            # ═══════════════════════════════════════
+            # FASE 1: Jalankan SEMUA tools PARALEL
+            # ═══════════════════════════════════════
+            async with httpx.AsyncClient() as client:
+                print("[Orchestrator] Phase 1: Running all data tools in PARALLEL...")
+                satellite_task = self._run_tool(client, "satellite_audit", {
+                    "lokasi": location, "koordinat": "", "periode_bulan": 12
+                })
+                osint_task = self._run_tool(client, "osint_intel", {
+                    "query": f"{location} alih fungsi lahan lingkungan",
+                    "lokasi": location,
+                    "max_artikel": 10
+                })
+                community_task = self._run_tool(client, "community_engagement", {
+                    "lokasi": location,
+                    "fokus_analisis": "subak dan alih fungsi lahan"
+                })
+
+                # All 3 run at the same time!
+                sat_data, osint_data, comm_data = await asyncio.gather(
+                    satellite_task, osint_task, community_task
                 )
-            })
-        if prompt:
-            self._save(db, "user", prompt)
-            messages.append({"role": "user", "content": prompt})
+                print("[Orchestrator] Phase 1 complete — all data collected")
 
-        for _ in range(5): # Max 5 loops
-            payload = {"model": self.model, "messages": messages, "tools": tools, "tool_choice": "auto"}
-            res = requests.post(OPENROUTER_URL, headers=self.headers, json=payload).json()
-            
-            if 'error' in res:
-                print(f"[Orchestrator] API Error: {res['error']}")
-                return f"Error from AI Provider: {res['error'].get('message')}"
+                # ═══════════════════════════════════════
+                # FASE 2: Satu AI call untuk tulis laporan
+                # ═══════════════════════════════════════
+                print("[Orchestrator] Phase 2: AI writing final report...")
 
-            if 'choices' not in res:
-                print(f"[Orchestrator] Unexpected Response: {res}")
-                return "Error: No choices in API response."
+                report_prompt = f"""Kamu adalah PEMALI AI, auditor ekologi otonom berbasis Tri Hita Karana.
 
-            ai_msg = res['choices'][0]['message']
-            self._save(db, "assistant", ai_msg.get("content") or "")
-            messages.append(ai_msg)
+Data audit untuk lokasi **{location}** telah dikumpulkan:
 
-                    ai_msg = res_data['choices'][0]['message']
-                    print(f"[Orchestrator] AI Response: {ai_msg.get('content')[:50]}...")
-                    self._save(db, "assistant", ai_msg.get("content") or "")
-                    messages.append(ai_msg)
+### Data Satelit Sentinel-2:
+{json.dumps(sat_data, indent=2, ensure_ascii=False)[:2000]}
 
-                    if not ai_msg.get("tool_calls"):
-                        break
+### Data OSINT & Berita:
+{json.dumps(osint_data, indent=2, ensure_ascii=False)[:1500]}
 
-                    for tool in ai_msg["tool_calls"]:
-                        t_name = tool["function"]["name"]
-                        t_args = json.loads(tool["function"]["arguments"])
-                        
-                        # Execute via Communicate Layer
-                        obs_res = await client.post(f"{API_BASE}/execute", json={
-                            "session_id": self.session_id,
-                            "tool_name": t_name,
-                            "parameters": t_args
-                        })
-                        obs = obs_res.json()
+### Data Keterlibatan Komunitas:
+{json.dumps(comm_data, indent=2, ensure_ascii=False)[:1000]}
 
-                        messages.append({
-                            "role": "tool", 
-                            "tool_call_id": tool["id"], 
-                            "name": t_name, 
-                            "content": json.dumps(obs)
-                        })
-                except Exception as e:
-                    print(f"[Orchestrator] Loop Error: {e}")
-                    break
+Tulis LAPORAN AUDIT KOMPREHENSIF dalam Bahasa Indonesia dengan format Markdown yang mencakup:
 
-        db.close()
-        return messages[-1]["content"] if messages else "No response generated."
+## I. RINGKASAN EKSEKUTIF
+(2-3 paragraf ringkasan temuan kritis)
+
+## II. PALEMAHAN (Hubungan Manusia – Alam)
+### A. Analisis Citra Satelit (Sentinel-2)
+(Tabel metrik: NDVI, konversi lahan, area terbangun)
+
+## III. PAWONGAN (Hubungan Antar Manusia)
+### A. Dinamika Sosial dari OSINT
+(Tabel artikel berita + sentimen)
+### B. Analisis Komunitas
+(Tabel indikator keterlibatan)
+
+## IV. PARAHYANGAN (Hubungan Manusia – Tuhan/Nilai Spiritual)
+(Dimensi spiritual dari temuan)
+
+## V. KESIMPULAN & REKOMENDASI
+(Bullet points rekomendasi konkret + status prioritas)
+
+Laporan harus otoritatif, ilmiah, dan berdasarkan data yang diberikan di atas."""
+
+                payload = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": "Kamu adalah auditor ekologi ilmiah yang menulis laporan formal berdasarkan data yang diberikan. Selalu tulis dalam Bahasa Indonesia dengan format Markdown yang rapi."},
+                        {"role": "user", "content": report_prompt}
+                    ],
+                    "max_tokens": 3000,
+                    "temperature": 0.3
+                }
+
+                res_raw = await client.post(
+                    OPENROUTER_URL,
+                    headers=self.headers,
+                    json=payload,
+                    timeout=120
+                )
+                res = res_raw.json()
+
+                if "error" in res:
+                    print(f"[Orchestrator] API Error: {res['error']}")
+                    narrative = f"Error dari AI: {res['error'].get('message', 'Unknown')}"
+                    thk = "Palemahan"
+                    issue = "Error Sistem"
+                elif "choices" not in res:
+                    narrative = "Gagal mendapatkan respons dari AI."
+                    thk = "Palemahan"
+                    issue = "Error Sistem"
+                else:
+                    narrative = res["choices"][0]["message"]["content"]
+                    print(f"[Orchestrator] ✓ Report generated ({len(narrative)} chars)")
+
+                    # Determine THK and issue from satellite data
+                    sat_inner = sat_data.get("data", sat_data) if isinstance(sat_data, dict) else {}
+                    ndvi = sat_inner.get("ndvi_mean", 0.4) if isinstance(sat_inner, dict) else 0.4
+                    thk = "Palemahan" if ndvi < 0.5 else "Pawongan"
+                    issue = sat_inner.get("issue_type", "Alih Fungsi Lahan") if isinstance(sat_inner, dict) else "Alih Fungsi Lahan & Konflik Sosial-Ekologis"
+
+                # Save narrative to memory
+                self._save(db, "assistant", narrative)
+
+                # ═══════════════════════════════════════
+                # FASE 3: Simpan ke DB langsung
+                # ═══════════════════════════════════════
+                self._save_audit_log(db, location, issue, narrative, thk)
+
+                return narrative
+
+        except Exception as e:
+            print(f"[Orchestrator] Fatal Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error sistem: {e}"
+        finally:
+            db.close()

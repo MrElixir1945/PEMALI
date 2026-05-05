@@ -51,7 +51,7 @@ class SatelliteModule(PemaliModule):
             }
         }
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         """
         Mengambil dan menganalisis data citra satelit Sentinel-2 untuk lokasi target.
         Menghasilkan metrik NDVI, kerapatan vegetasi, dan indikasi alih fungsi lahan.

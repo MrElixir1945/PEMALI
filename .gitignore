@@ -3,21 +3,26 @@ __pycache__/
 *.py[cod]
 *$py.class
 venv/
-ENV/
-env/
 .env
+*.log
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
 
 # Database
 *.sqlite3
+postgres_data/
 
-# IDEs
+# IDEs & OS
 .vscode/
 .idea/
-
-# OS
 .DS_Store
 Thumbs.db
 
-# PEMALI Specific
-*.log
+# Project Specific
 data/

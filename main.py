@@ -193,6 +193,22 @@ async def trigger_agent(req: TriggerRequest, bg_tasks: BackgroundTasks):
     bg_tasks.add_task(run_agent_in_background, req.prompt)
     return {"status": "started"}
 
+@app.post("/api/new-session")
+async def new_session():
+    """Reset the current session — clear all agent memories and audit logs."""
+    db = SessionLocal()
+    try:
+        db.query(AgentMemory).delete()
+        db.query(AuditLog).delete()
+        db.query(AutonomousTask).filter(AutonomousTask.status == "running").update({"status": "cancelled"})
+        db.commit()
+        return {"status": "reset", "message": "Session cleared successfully"}
+    except Exception as e:
+        db.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        db.close()
+
 if __name__ == "__main__":
     print("[System] Starting Communicate Layer...")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

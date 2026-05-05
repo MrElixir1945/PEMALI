@@ -48,7 +48,7 @@ class OsintModule(PemaliModule):
             }
         }
 
-    async def execute(self, params: Dict[str, Any]) -> ModuleOutput:
+    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
         """
         Menjalankan pengumpulan OSINT: agregasi berita, analisis sentimen,
         dan identifikasi isu-isu kritis yang relevan dengan query dan lokasi target.
