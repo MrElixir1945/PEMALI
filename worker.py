@@ -4,11 +4,18 @@ import time
 import sys
 from sqlalchemy.orm import Session
 from core.database import SessionLocal, AutonomousTask, init_db
+from core.orchestrator import PemaliOrchestrator
+from core.telemetry import telemetry
+from core.models import TelemetryEvent, NodeState
 
-async def check_and_execute_tasks():
+async def process_autonomous_queue():
+    """
+    Loop utama untuk memantau tugas otonom yang terjadwal.
+    Mengintegrasikan retry logic DB dan telemetry stream.
+    """
     print("[Worker] Initializing database tables...")
     
-    # Retry logic for database connection
+    # 1. Retry logic untuk koneksi database awal
     max_retries = 5
     retry_count = 0
     while retry_count < max_retries:
@@ -26,61 +33,81 @@ async def check_and_execute_tasks():
                 print("[Worker] Max retries reached. Exiting.")
                 sys.exit(1)
     
-    print("[Worker] Heartbeat started. Monitoring autonomous_tasks...")
+    print("[Worker] Tick Engine started. Monitoring autonomous_tasks table...")
     
     while True:
         db = None
         try:
             db = SessionLocal()
             if not db:
-                print("[Worker] Failed to create database session. Retrying in 10s...")
                 await asyncio.sleep(10)
                 continue
 
+            # Gunakan UTC untuk konsistensi jadwal
             now = datetime.datetime.now(datetime.timezone.utc)
             
-            # 1. Cari tugas yang statusnya 'pending' dan sudah masuk waktunya (execute_at <= now)
-            pending_task = db.query(AutonomousTask).filter(
+            # 2. Cari tugas yang statusnya 'pending' dan sudah masuk waktunya
+            task = db.query(AutonomousTask).filter(
                 AutonomousTask.status == "pending",
                 AutonomousTask.execute_at <= now
-            ).first()
-
-            if pending_task:
-                print(f"[Worker] Triggering Task ID: {pending_task.id} - Reason: {pending_task.intent_description}")
+            ).order_by(AutonomousTask.execute_at.asc()).first()
+            
+            if task:
+                print(f"[Worker] Triggering Task ID: {task.id} - {task.intent_description}")
                 
-                # 2. Re-activate Orchestrator
-                from core.orchestrator import PemaliOrchestrator
-                session_id = f"auto-{pending_task.id}"
-                agent = PemaliOrchestrator(session_id=session_id)
+                # Update status ke running agar tidak di-pick worker lain
+                task.status = "running"
+                db.commit()
                 
-                prompt = f"Executing scheduled task. Context: {pending_task.intent_description}"
+                # 3. Emit telemetry: Memberitahu UI bahwa proses otonom dimulai
+                trace_id = f"auto-{task.id}-{int(time.time())}"
+                await telemetry.emit(TelemetryEvent(
+                    trace_id=trace_id,
+                    node_id="worker_daemon",
+                    node_type="System",
+                    state=NodeState.THINKING,
+                    narrative=f"Mengeksekusi rencana otonom: {task.intent_description}"
+                ))
+                
+                # 4. Jalankan Orchestrator (The Brain)
+                agent = PemaliOrchestrator(session_id=trace_id)
                 
                 try:
-                    # Update status jadi running agar tidak dieksekusi worker lain
-                    pending_task.status = "running"
-                    db.commit()
+                    await agent.run(task.intent_description)
+                    task.status = "completed"
                     
-                    await agent.run(prompt)
-                    
-                    # 3. Mark as completed
-                    pending_task.status = "completed"
-                    print(f"[Worker] Task {pending_task.id} completed successfully.")
+                    await telemetry.emit(TelemetryEvent(
+                        trace_id=trace_id,
+                        node_id="worker_daemon",
+                        node_type="System",
+                        state=NodeState.DONE,
+                        narrative="Tugas otonom berhasil diselesaikan."
+                    ))
                 except Exception as e:
-                    pending_task.status = "failed"
-                    print(f"[Worker] Task {pending_task.id} failed: {str(e)}")
+                    task.status = "failed"
+                    print(f"[Worker] Task execution failed: {e}")
+                    
+                    await telemetry.emit(TelemetryEvent(
+                        trace_id=trace_id,
+                        node_id="worker_daemon",
+                        node_type="System",
+                        state=NodeState.ERROR,
+                        narrative=f"Kegagalan eksekusi otonom: {str(e)}"
+                    ))
                 
                 db.commit()
+            
         except Exception as e:
-            print(f"[Worker] Runtime Error: {e}")
+            print(f"[Worker] Runtime Loop Error: {e}")
         finally:
             if db:
                 db.close()
-        
-        # Cek setiap 30 detik
-        await asyncio.sleep(30)
+            
+        # Polling interval: Cek setiap 15 detik
+        await asyncio.sleep(15)
 
 if __name__ == "__main__":
     try:
-        asyncio.run(check_and_execute_tasks())
+        asyncio.run(process_autonomous_queue())
     except KeyboardInterrupt:
-        print("[Worker] Stopping...")
+        print("[Worker] Stopping heartbeat engine...")

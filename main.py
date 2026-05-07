@@ -1,19 +1,32 @@
-# Central Orchestrator & Fast API
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import uvicorn
 import datetime
 import json
 import asyncio
 import os
 
+# Import Core Components
 from core.registry import registry
 from core.base_module import ModuleOutput
 from core.database import SessionLocal, AutonomousTask, AgentMemory, AuditLog
 from core.orchestrator import PemaliOrchestrator
+from core.telemetry import telemetry
+from core.models import TelemetryEvent, NodeState
 
-app = FastAPI(title="PEMALI Communicate Layer", version="1.2")
+app = FastAPI(title="PEMALI Communicate Layer", version="2.5")
+
+# Setup CORS agar frontend (Next.js) bisa akses SSE tanpa hambatan
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- Schemas ---
 class ToolCallRequest(BaseModel):
@@ -24,26 +37,27 @@ class ToolCallRequest(BaseModel):
 class TriggerRequest(BaseModel):
     prompt: str
 
-# --- Endpoints ---
+# --- Core API Endpoints ---
 @app.get("/")
 async def root():
-    """Health check endpoint."""
+    """Health check & Engine identity."""
     return {
         "status": "online",
-        "service": "PEMALI Communicate Layer",
+        "service": "PEMALI Super Agent (Hierarchical DAG)",
+        "engine": "v2.5.0-production",
         "timestamp": datetime.datetime.now().isoformat()
     }
 
-@app.get("/api/tools", response_model=List[Dict[str, Any]])
-@app.get("/tools", response_model=List[Dict[str, Any]]) # Backward compatibility
+@app.get("/api/tools")
+@app.get("/tools") 
 async def get_available_tools():
-    """Discovery endpoint for LLM context."""
+    """Discovery endpoint untuk registrasi tools ke LLM."""
     return registry.get_all_manifests()
 
 @app.post("/api/execute", response_model=ModuleOutput)
-@app.post("/execute", response_model=ModuleOutput) # Backward compatibility
+@app.post("/execute", response_model=ModuleOutput)
 async def execute_agent_tool(request: ToolCallRequest):
-    """Execution endpoint for Agent tool calls."""
+    """Internal execution endpoint untuk module calls."""
     try:
         result = await registry.execute_tool(
             request.tool_name, 
@@ -56,42 +70,55 @@ async def execute_agent_tool(request: ToolCallRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Module execution failed: {str(e)}")
 
-# --- New Frontend API Endpoints ---
+# --- Real-time SSE Telemetry ---
+@app.get("/api/stream")
+async def stream_telemetry(request: Request):
+    """
+    Endpoint SSE (Server-Sent Events) untuk Dashboard.
+    Menyalurkan kognisi AI (thinking, spawning, executing) secara asinkron.
+    """
+    return StreamingResponse(
+        telemetry.subscribe(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Type": "text/event-stream"
+        }
+    )
+
+# --- Legacy Dashboard Data Endpoints ---
 @app.get("/api/status")
 async def get_system_status():
-    """Returns data for the system status."""
-    db = None
+    """Agregasi data untuk Overview Dashboard (Worker status & Recent Audits)."""
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        if not db:
-            return {"fastapi_active": True, "worker_active": False, "tasks": [], "error": "Database session failed"}
-            
-        # Check worker status via AutonomousTask heartbeat
+        # 1. Cek Worker Status via AutonomousTask heartbeat
         latest_task = db.query(AutonomousTask).order_by(AutonomousTask.id.desc()).first()
-        worker_active = False
-        if latest_task and latest_task.status in ["running", "completed", "pending"]:
-            worker_active = True
+        worker_active = True if latest_task and latest_task.status in ["running", "pending"] else False
             
         tasks = db.query(AutonomousTask).order_by(AutonomousTask.id.desc()).limit(5).all()
         queue = [{"id": t.id, "intent": t.intent_description, "status": t.status} for t in tasks]
         
-        # Fetch Recent Audits
+        # 2. Fetch Recent Audits (History)
         recent_audits = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(10).all()
         audits_list = []
         for a in recent_audits:
-            # Ambil pesan pertama user untuk judul history
+            # Ambil pesan pertama user untuk judul ringkasan
             first_msg = db.query(AgentMemory).filter(
                 AgentMemory.session_id == a.session_id,
                 AgentMemory.role == "user"
             ).order_by(AgentMemory.created_at.asc()).first()
             
-            title = first_msg.content[:40] + "..." if first_msg and len(first_msg.content) > 40 else (first_msg.content if first_msg else a.issue_type)
+            summary_title = first_msg.content[:45] + "..." if first_msg and len(first_msg.content) > 45 else (first_msg.content if first_msg else a.issue_type)
 
             audits_list.append({
                 "id": a.id, 
+                "session_id": a.session_id,
                 "location": a.location, 
-                "issue": title, 
-                "thk": a.thk_alignment,
+                "issue": summary_title, 
+                "thk_score": a.thk_alignment,
                 "timestamp": a.created_at.isoformat()
             })
         
@@ -99,110 +126,107 @@ async def get_system_status():
             "fastapi_active": True,
             "worker_active": worker_active,
             "modules": registry.get_all_manifests(),
-            "tasks": queue,
-            "recent_audits": audits_list
+            "tasks_queue": queue,
+            "audit_history": audits_list
         }
     except Exception as e:
-        print(f"[API] Status Error: {e}")
-        return {
-            "fastapi_active": True,
-            "worker_active": False,
-            "modules": registry.get_all_manifests(),
-            "tasks": [],
-            "recent_audits": [],
-            "error": str(e)
-        }
+        return {"error": str(e), "fastapi_active": True}
     finally:
-        if db:
-            db.close()
+        db.close()
 
 @app.get("/api/session")
 async def get_session_data(session_id: Optional[str] = None):
-    """Returns data for the interaction history."""
-    db = None
+    """Mengambil riwayat kognitif, chat, dan metadata spasial per sesi."""
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        if not db:
-            return {"session_id": None, "error": "Database session failed"}
-            
-        # 1. Determine Target Session
-        if session_id:
-            target_session = session_id
-        else:
+        # Jika session_id tidak diberikan, ambil yang paling terbaru
+        if not session_id:
             latest_mem = db.query(AgentMemory).order_by(AgentMemory.id.desc()).first()
-            target_session = latest_mem.session_id if latest_mem else None
+            session_id = latest_mem.session_id if latest_mem else None
         
-        if not target_session:
-            return {"session_id": None}
+        if not session_id:
+            return {"session_id": None, "message": "No session history found"}
             
-        memories = db.query(AgentMemory).filter(AgentMemory.session_id == target_session).order_by(AgentMemory.id.asc()).all()
+        # 1. Fetch Chat & Internal Reasoning
+        memories = db.query(AgentMemory).filter(AgentMemory.session_id == session_id).order_by(AgentMemory.id.asc()).all()
         mem_list = [{"id": m.id, "role": m.role, "content": m.content, "name": m.name} for m in memories]
         
-        # Check if audit exists for this session
-        latest_log = db.query(AuditLog).filter(AuditLog.session_id == target_session).first()
-        # Fallback to latest if not found and it's the latest session (optional, but safer)
-        if not latest_log and not session_id:
-             latest_log = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+        # 2. Fetch Audit Report
+        latest_log = db.query(AuditLog).filter(AuditLog.session_id == session_id).first()
         audit_data = None
         if latest_log:
-            # Simulate NDVI scores for the UI
             audit_data = {
                 "id": latest_log.id,
                 "location": latest_log.location,
                 "issue": latest_log.issue_type,
                 "narrative": latest_log.narrative_report,
                 "thk": latest_log.thk_alignment,
-                "ndvi_score": 0.42,
-                "ndvi_change": -12.5
+                "metadata": latest_log.metadata_json,
+                "created_at": latest_log.created_at.isoformat()
             }
-            
-        # Get satellite image if available
-        tool_mems = db.query(AgentMemory).filter(AgentMemory.session_id == target_session, AgentMemory.name == "satellite_intelligence").order_by(AgentMemory.id.desc()).first()
+        
+        # 3. Extract Satellite Images (Jika ada di memory modul)
+        sat_mem = db.query(AgentMemory).filter(
+            AgentMemory.session_id == session_id, 
+            AgentMemory.name == "satellite_intelligence"
+        ).order_by(AgentMemory.id.desc()).first()
+        
         img_url = None
-        if tool_mems and tool_mems.content:
+        if sat_mem and sat_mem.content:
             try:
-                data = json.loads(tool_mems.content)
-                img_url = data.get("data", {}).get("image_url")
-            except:
-                pass
+                raw_data = json.loads(sat_mem.content)
+                img_url = raw_data.get("data", {}).get("image_url")
+            except: pass
                 
         return {
-            "session_id": target_session,
+            "session_id": session_id,
             "memories": mem_list,
             "audit_log": audit_data,
             "satellite_img": img_url
         }
     except Exception as e:
-        print(f"[API] Session Error: {e}")
-        return {"session_id": None, "error": str(e)}
+        return {"error": str(e), "session_id": session_id}
     finally:
-        if db:
-            db.close()
+        db.close()
 
-async def run_agent_in_background(prompt: str):
-    session_id = f"audit-web-{int(datetime.datetime.now().timestamp())}"
+# --- Orchestration Handlers ---
+async def run_hierarchical_background(prompt: str):
+    """Runner asinkron untuk Orchestrator Baru dengan integrasi Telemetry."""
+    session_id = f"audit-hier-{int(datetime.datetime.now().timestamp())}"
     agent = PemaliOrchestrator(session_id=session_id)
     try:
         await agent.run(prompt)
     except Exception as e:
-        print(f"[Background Agent] Error: {e}")
+        # Emit error critical agar dashboard UI tidak stuck
+        await telemetry.emit(TelemetryEvent(
+            trace_id="system-err",
+            node_id="background_worker",
+            node_type="System",
+            state=NodeState.ERROR,
+            narrative=f"Critical Orchestration Error: {str(e)}"
+        ))
 
 @app.post("/api/trigger")
 async def trigger_agent(req: TriggerRequest, bg_tasks: BackgroundTasks):
-    """Trigger agent logic asynchronously"""
-    bg_tasks.add_task(run_agent_in_background, req.prompt)
-    return {"status": "started"}
+    """Memulai siklus audit (Manual Trigger)."""
+    bg_tasks.add_task(run_hierarchical_background, req.prompt)
+    return {
+        "status": "started", 
+        "mode": "hierarchical_dag",
+        "message": "Agent cycle initiated. Please listen to /api/stream for real-time CoT."
+    }
 
 @app.post("/api/new-session")
-async def new_session():
-    """Reset the current session — clear all agent memories and audit logs."""
+@app.post("/api/reset")
+async def clear_system_state():
+    """Membersihkan database untuk pengujian bersih (Clean state)."""
     db = SessionLocal()
     try:
         db.query(AgentMemory).delete()
         db.query(AuditLog).delete()
         db.query(AutonomousTask).filter(AutonomousTask.status == "running").update({"status": "cancelled"})
         db.commit()
-        return {"status": "reset", "message": "Session cleared successfully"}
+        return {"status": "reset", "message": "Global session data cleared successfully."}
     except Exception as e:
         db.rollback()
         return {"status": "error", "message": str(e)}
@@ -210,5 +234,5 @@ async def new_session():
         db.close()
 
 if __name__ == "__main__":
-    print("[System] Starting Communicate Layer...")
+    print("[PEMALI] Core Engine API booting up...")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

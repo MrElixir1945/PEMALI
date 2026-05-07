@@ -1,213 +1,236 @@
 import json
-import asyncio
 import httpx
-import datetime
+import asyncio
 import os
+import datetime
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from core.database import SessionLocal, AgentMemory, AuditLog
+from core.database import SessionLocal, AgentMemory
+from core.memory import query_semantic, store_semantic_memory
+from core.models import MasterPlan, TaskIntent, TelemetryEvent, NodeState
+from core.telemetry import telemetry
 from dotenv import load_dotenv
 
 load_dotenv()
 
 OPENROUTER_URL = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 API_BASE = os.getenv("API_BASE", "http://localhost:8000")
-OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
+OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
 
-if not OPENROUTER_KEY:
-    print("[Warning] OPENROUTER_KEY not found!")
+class SubAgent:
+    """Worker terisolasi yang menjalankan instruksi spesifik dengan kemampuan Self-Healing."""
+    def __init__(self, task: TaskIntent, session_id: str, tools: List[Dict], trace_id: str):
+        self.task = task
+        self.session_id = session_id
+        self.trace_id = trace_id
+        self.tools = tools 
+        self.headers = {"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"}
+        self.max_retries = 3 # Batas maksimal untuk self-correction
 
+    async def execute(self) -> Dict:
+        await telemetry.emit(TelemetryEvent(
+            trace_id=self.trace_id, node_id=self.task.target_agent, node_type="SubAgent",
+            state=NodeState.THINKING, narrative=f"Menganalisis instruksi: {self.task.intent}..."
+        ))
+
+        # System prompt ditambahkan instruksi self-correction
+        messages = [{"role": "system", "content": f"You are {self.task.target_agent}. Task: {self.task.intent}. If tool execution fails, read the error message and fix your parameters."}]
+        
+        for attempt in range(self.max_retries):
+            payload = {"model": OPENROUTER_MODEL, "messages": messages, "tools": self.tools, "tool_choice": "auto"}
+            
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    res = await client.post(OPENROUTER_URL, headers=self.headers, json=payload)
+                    res.raise_for_status()
+                    ai_msg = res.json()['choices'][0]['message']
+                    
+                    # Append history agar AI ingat apa yang dia lakukan sebelumnya
+                    messages.append(ai_msg)
+                    
+                    if ai_msg.get("tool_calls"):
+                        await telemetry.emit(TelemetryEvent(
+                            trace_id=self.trace_id, node_id=self.task.target_agent, node_type="SubAgent",
+                            state=NodeState.EXECUTING, narrative=f"Eksekusi tools (Attempt {attempt+1}/{self.max_retries})..."
+                        ))
+
+                        tasks = []
+                        for tc in ai_msg["tool_calls"]:
+                            t_name = tc["function"]["name"]
+                            t_args = json.loads(tc["function"]["arguments"])
+                            tasks.append(self._execute_tool(t_name, t_args, tc["id"]))
+                        
+                        results = await asyncio.gather(*tasks)
+                        
+                        has_error = False
+                        final_results = []
+                        
+                        for res_data in results:
+                            # Masukkan output modul ke memory percakapan LLM
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": res_data["tool_call_id"],
+                                "name": res_data["tool_name"],
+                                "content": json.dumps(res_data["output"])
+                            })
+                            final_results.append(res_data["output"])
+                            
+                            # Deteksi apakah modul gagal (Validation 400 atau Execution 500)
+                            if res_data["output"].get("status") in [400, 500]:
+                                has_error = True
+                        
+                        if has_error and attempt < self.max_retries - 1:
+                            await telemetry.emit(TelemetryEvent(
+                                trace_id=self.trace_id, node_id=self.task.target_agent, node_type="SubAgent",
+                                state=NodeState.THINKING, narrative="Mendeteksi error modul. Melakukan self-correction..."
+                            ))
+                            continue # Paksa AI mikir ulang dengan membaca error di 'messages'
+                        
+                        await telemetry.emit(TelemetryEvent(
+                            trace_id=self.trace_id, node_id=self.task.target_agent, node_type="SubAgent",
+                            state=NodeState.DONE, narrative="Sub-task selesai."
+                        ))
+                        return {"agent": self.task.target_agent, "results": final_results}
+                    
+                    # Jika tidak ada tool call, kembalikan respons teks biasa
+                    return {"agent": self.task.target_agent, "response": ai_msg.get("content")}
+                    
+            except Exception as e:
+                # Tangani Network Error (seperti 429 Too Many Requests)
+                if attempt < self.max_retries - 1:
+                    await telemetry.emit(TelemetryEvent(
+                        trace_id=self.trace_id, node_id=self.task.target_agent, node_type="SubAgent",
+                        state=NodeState.ERROR, narrative=f"Network Error. Retrying in 3s (Attempt {attempt+1})..."
+                    ))
+                    await asyncio.sleep(3)
+                    continue
+                else:
+                    await telemetry.emit(TelemetryEvent(
+                        trace_id=self.trace_id, node_id=self.task.target_agent, node_type="SubAgent",
+                        state=NodeState.ERROR, narrative=f"Fatal Error: {str(e)}"
+                    ))
+                    return {"error": str(e)}
+                    
+        return {"error": "Max retries reached."}
+
+    async def _execute_tool(self, name: str, args: Dict, tool_call_id: str) -> Dict:
+        """Modifikasi sedikit untuk membawa tool_call_id agar LLM bisa mapping hasilnya."""
+        await telemetry.emit(TelemetryEvent(
+            trace_id=self.trace_id, node_id=name, node_type="Module",
+            state=NodeState.EXECUTING, narrative=f"Eksekusi modul {name}..."
+        ))
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                res = await client.post(f"{API_BASE}/api/execute", json={
+                    "session_id": self.session_id, "tool_name": name, "parameters": args
+                })
+                return {"tool_call_id": tool_call_id, "tool_name": name, "output": res.json()}
+        except Exception as e:
+            return {"tool_call_id": tool_call_id, "tool_name": name, "output": {"status": 500, "error_msg": str(e)}}
 
 class PemaliOrchestrator:
-    def __init__(self, session_id: str, model: str = None):
+    def __init__(self, session_id: str):
         self.session_id = session_id
-        self.model = model or OPENROUTER_MODEL
-        print(f"[Orchestrator] Session: {self.session_id} | Model: {self.model}")
-        self.headers = {
-            "Authorization": f"Bearer {OPENROUTER_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://pemali.id",
-            "X-Title": "PEMALI Audit Platform"
+        self.headers = {"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"}
+
+    async def run(self, prompt: str):
+        trace_id = f"tr-{int(datetime.datetime.now().timestamp())}"
+        
+        # 1. Manager Planning
+        await telemetry.emit(TelemetryEvent(
+            trace_id=trace_id, node_id="manager", node_type="Manager",
+            state=NodeState.THINKING, narrative="Menyusun Master Plan berbasis RAG..."
+        ))
+
+        past_memories = query_semantic(prompt, n_results=2)
+        rag_context = "\n".join([f"- {m['content']}" for m in past_memories]) if past_memories else ""
+
+        sys_prompt = (
+            "You are MANAGER AGENT. Analyze and delegate. "
+            "Output JSON matching: {'trace_id': 'string', 'tasks': [{'task_id': 'string', 'target_agent': 'string', 'intent': 'string', 'depends_on': ['task_id']}]}"
+        )
+        
+        payload = {
+            "model": OPENROUTER_MODEL,
+            "messages": [
+                {"role": "system", "content": f"{sys_prompt}\nContext: {rag_context}"},
+                {"role": "user", "content": prompt}
+            ],
+            "response_format": {"type": "json_object"}
         }
 
-    def _save(self, db: Session, role: str, content: str, name: str = None):
-        db.add(AgentMemory(session_id=self.session_id, role=role, content=content, name=name))
-        db.commit()
-
-    async def _run_tool(self, client: httpx.AsyncClient, tool_name: str, params: Dict) -> Dict:
-        """Jalankan satu tool, return hasilnya."""
-        print(f"[Orchestrator] ⚙ Tool: {tool_name}")
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(OPENROUTER_URL, headers=self.headers, json=payload)
+            res.raise_for_status()
+            plan_raw = res.json()['choices'][0]['message']['content']
+        
         try:
-            r = await client.post(
-                f"{API_BASE}/execute",
-                json={"session_id": self.session_id, "tool_name": tool_name, "parameters": params},
-                timeout=20
-            )
-            data = r.json()
-            print(f"[Orchestrator] ✓ Done: {tool_name}")
-            return data
+            plan = MasterPlan(**json.loads(plan_raw))
+            plan.trace_id = trace_id
         except Exception as e:
-            print(f"[Orchestrator] ✗ Failed: {tool_name} — {e}")
-            return {"status": "error", "tool": tool_name, "error": str(e)}
+            await telemetry.emit(TelemetryEvent(trace_id=trace_id, node_id="manager", node_type="Manager", state=NodeState.ERROR, narrative=f"Plan Error: {e}"))
+            return f"Error: {e}"
 
-    def _save_audit_log(self, db: Session, location: str, issue: str, narrative: str, thk: str):
-        """Langsung simpan AuditLog ke DB."""
-        try:
-            log = AuditLog(
-                session_id=self.session_id,
-                location=location,
-                issue_type=issue,
-                narrative_report=narrative,
-                thk_alignment=thk,
-                metadata_json={"source": "PEMALI_Direct_Pipeline"}
-            )
-            db.add(log)
-            db.commit()
-            print(f"[Orchestrator] ✅ AuditLog saved: id={log.id}")
-            return log.id
-        except Exception as e:
-            print(f"[Orchestrator] ✗ AuditLog save failed: {e}")
-            db.rollback()
-            return None
+        # 2. DAG Execution
+        await telemetry.emit(TelemetryEvent(
+            trace_id=trace_id, node_id="manager", node_type="Manager",
+            state=NodeState.SPAWNING, narrative=f"Menjalankan {len(plan.tasks)} tugas dalam urutan DAG..."
+        ))
 
-    def _extract_location(self, prompt: str) -> str:
-        """Simple extraction of location from prompt."""
-        keywords = ["di ", "kawasan ", "wilayah ", "daerah ", "lokasi "]
-        for kw in keywords:
-            if kw in prompt.lower():
-                idx = prompt.lower().index(kw) + len(kw)
-                return prompt[idx:idx+50].strip().rstrip(".,")
-        return prompt[:50]
+        tools = await self._fetch_tools()
+        shared_context = {}
+        completed_tasks = set()
+        pending_tasks = {t.task_id: t for t in plan.tasks}
 
-    async def run(self, prompt: Optional[str] = None):
-        db = SessionLocal()
-        try:
-            # Save user message
-            if prompt:
-                self._save(db, "user", prompt)
-                # Quick ack to user
-                ack = f"Baik, saya akan melakukan audit di lokasi yang disebutkan. Mengumpulkan data satelit dan informasi publik..."
-                self._save(db, "assistant", ack)
+        while pending_tasks:
+            # Ambil task yang dependensinya sudah selesai semua
+            ready_tasks = [
+                t for t in pending_tasks.values() 
+                if all(dep in completed_tasks for dep in t.depends_on)
+            ]
 
-            location = self._extract_location(prompt or "Bali")
+            if not ready_tasks:
+                raise ValueError("DAG Deadlock terdeteksi: Circular dependency.")
 
-            # ═══════════════════════════════════════
-            # FASE 1: Jalankan SEMUA tools PARALEL
-            # ═══════════════════════════════════════
-            async with httpx.AsyncClient() as client:
-                print("[Orchestrator] Phase 1: Running all data tools in PARALLEL...")
-                satellite_task = self._run_tool(client, "satellite_audit", {
-                    "lokasi": location, "koordinat": "", "periode_bulan": 12
-                })
-                osint_task = self._run_tool(client, "osint_intel", {
-                    "query": f"{location} alih fungsi lahan lingkungan",
-                    "lokasi": location,
-                    "max_artikel": 10
-                })
-                community_task = self._run_tool(client, "community_engagement", {
-                    "lokasi": location,
-                    "fokus_analisis": "subak dan alih fungsi lahan"
-                })
+            # Injeksi shared_context ke prompt Sub-Agent
+            for t in ready_tasks:
+                if t.depends_on:
+                    t.intent += f"\n[SHARED DATA]: {json.dumps({d: shared_context[d] for d in t.depends_on})}"
 
-                # All 3 run at the same time!
-                sat_data, osint_data, comm_data = await asyncio.gather(
-                    satellite_task, osint_task, community_task
-                )
-                print("[Orchestrator] Phase 1 complete — all data collected")
+            # Eksekusi task yang siap secara paralel
+            coroutines = [SubAgent(t, self.session_id, tools, trace_id).execute() for t in ready_tasks]
+            results = await asyncio.gather(*coroutines)
 
-                # ═══════════════════════════════════════
-                # FASE 2: Satu AI call untuk tulis laporan
-                # ═══════════════════════════════════════
-                print("[Orchestrator] Phase 2: AI writing final report...")
+            # Update state
+            for t, res in zip(ready_tasks, results):
+                shared_context[t.task_id] = res
+                completed_tasks.add(t.task_id)
+                del pending_tasks[t.task_id]
 
-                report_prompt = f"""Kamu adalah PEMALI AI, auditor ekologi otonom berbasis Tri Hita Karana.
+        raw_results = list(shared_context.values())
 
-Data audit untuk lokasi **{location}** telah dikumpulkan:
+        # 3. Final Aggregation
+        await telemetry.emit(TelemetryEvent(
+            trace_id=trace_id, node_id="manager", node_type="Manager",
+            state=NodeState.THINKING, narrative="Sintesis laporan final..."
+        ))
 
-### Data Satelit Sentinel-2:
-{json.dumps(sat_data, indent=2, ensure_ascii=False)[:2000]}
+        synth_payload = {
+            "model": OPENROUTER_MODEL,
+            "messages": [{"role": "user", "content": f"Synthesize: {json.dumps(raw_results)}"}]
+        }
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res_synth = await client.post(OPENROUTER_URL, headers=self.headers, json=synth_payload)
+            report = res_synth.json()['choices'][0]['message']['content']
 
-### Data OSINT & Berita:
-{json.dumps(osint_data, indent=2, ensure_ascii=False)[:1500]}
+        await telemetry.emit(TelemetryEvent(trace_id=trace_id, node_id="manager", node_type="Manager", state=NodeState.DONE, narrative="Audit selesai."))
+        
+        store_semantic_memory(self.session_id, f"Audit Result: {report}")
+        return report
 
-### Data Keterlibatan Komunitas:
-{json.dumps(comm_data, indent=2, ensure_ascii=False)[:1000]}
-
-Tulis LAPORAN AUDIT KOMPREHENSIF dalam Bahasa Indonesia dengan format Markdown yang mencakup:
-
-## I. RINGKASAN EKSEKUTIF
-(2-3 paragraf ringkasan temuan kritis)
-
-## II. PALEMAHAN (Hubungan Manusia – Alam)
-### A. Analisis Citra Satelit (Sentinel-2)
-(Tabel metrik: NDVI, konversi lahan, area terbangun)
-
-## III. PAWONGAN (Hubungan Antar Manusia)
-### A. Dinamika Sosial dari OSINT
-(Tabel artikel berita + sentimen)
-### B. Analisis Komunitas
-(Tabel indikator keterlibatan)
-
-## IV. PARAHYANGAN (Hubungan Manusia – Tuhan/Nilai Spiritual)
-(Dimensi spiritual dari temuan)
-
-## V. KESIMPULAN & REKOMENDASI
-(Bullet points rekomendasi konkret + status prioritas)
-
-Laporan harus otoritatif, ilmiah, dan berdasarkan data yang diberikan di atas."""
-
-                payload = {
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": "Kamu adalah auditor ekologi ilmiah yang menulis laporan formal berdasarkan data yang diberikan. Selalu tulis dalam Bahasa Indonesia dengan format Markdown yang rapi."},
-                        {"role": "user", "content": report_prompt}
-                    ],
-                    "max_tokens": 3000,
-                    "temperature": 0.3
-                }
-
-                res_raw = await client.post(
-                    OPENROUTER_URL,
-                    headers=self.headers,
-                    json=payload,
-                    timeout=120
-                )
-                res = res_raw.json()
-
-                if "error" in res:
-                    print(f"[Orchestrator] API Error: {res['error']}")
-                    narrative = f"Error dari AI: {res['error'].get('message', 'Unknown')}"
-                    thk = "Palemahan"
-                    issue = "Error Sistem"
-                elif "choices" not in res:
-                    narrative = "Gagal mendapatkan respons dari AI."
-                    thk = "Palemahan"
-                    issue = "Error Sistem"
-                else:
-                    narrative = res["choices"][0]["message"]["content"]
-                    print(f"[Orchestrator] ✓ Report generated ({len(narrative)} chars)")
-
-                    # Determine THK and issue from satellite data
-                    sat_inner = sat_data.get("data", sat_data) if isinstance(sat_data, dict) else {}
-                    ndvi = sat_inner.get("ndvi_mean", 0.4) if isinstance(sat_inner, dict) else 0.4
-                    thk = "Palemahan" if ndvi < 0.5 else "Pawongan"
-                    issue = sat_inner.get("issue_type", "Alih Fungsi Lahan") if isinstance(sat_inner, dict) else "Alih Fungsi Lahan & Konflik Sosial-Ekologis"
-
-                # Save narrative to memory
-                self._save(db, "assistant", narrative)
-
-                # ═══════════════════════════════════════
-                # FASE 3: Simpan ke DB langsung
-                # ═══════════════════════════════════════
-                self._save_audit_log(db, location, issue, narrative, thk)
-
-                return narrative
-
-        except Exception as e:
-            print(f"[Orchestrator] Fatal Error: {e}")
-            import traceback
-            traceback.print_exc()
-            return f"Error sistem: {e}"
-        finally:
-            db.close()
+    async def _fetch_tools(self) -> List[Dict]:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(f"{API_BASE}/api/tools")
+            return [{"type": "function", "function": m} for m in res.json()]

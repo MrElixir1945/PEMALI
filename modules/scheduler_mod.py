@@ -1,55 +1,65 @@
 import datetime
-from typing import Dict, Any
-from core.base_module import PemaliModule, ModuleOutput
+from typing import Dict, Any, List
+from pydantic import BaseModel, Field
+from core.base_module import PemaliModuleV2, ModuleOutput
 from core.database import SessionLocal, AutonomousTask
 
-class SystemSchedulerModule(PemaliModule):
-    @property
-    def manifest(self) -> Dict[str, Any]:
-        return {
-            "name": "system_scheduler",
-            "description": "Menjadwalkan tugas otonom di masa depan.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "minutes_from_now": {"type": "integer", "description": "Berapa menit lagi tugas harus jalan."},
-                    "intent": {"type": "string", "description": "Apa yang harus dilakukan agen nanti?"}
-                },
-                "required": ["minutes_from_now", "intent"]
-            }
-        }
+class SchedulerInput(BaseModel):
+    minutes_from_now: int = Field(..., description="Waktu tunda dalam hitungan menit sebelum AI Agent dibangunkan kembali.")
+    intent: str = Field(..., description="Deskripsi lengkap mengenai apa yang harus dikerjakan agen saat bangun nanti.")
+    priority: str = Field(default="normal", description="Prioritas tugas: 'low', 'normal', atau 'high'.")
 
-    async def execute(self, params: Dict[str, Any], session_id: str = None) -> ModuleOutput:
+class SystemSchedulerModule(PemaliModuleV2):
+    name = "system_scheduler"
+    description = "Mengatur jadwal agar AI Agent dapat melakukan inspeksi atau tugas otonom di masa depan tanpa pemicu dari user."
+    input_schema = SchedulerInput
+    depends_on: List[str] = []
+
+    async def execute(self, params: SchedulerInput, context: Dict[str, Any]) -> ModuleOutput:
         db = SessionLocal()
         try:
-            # Proteksi tipe data agar tidak 400 Bad Request
-            minutes = int(params.get("minutes_from_now", 1))
-            intent = str(params.get("intent", "Check again"))
+            # 1. Parameter sudah tervalidasi otomatis
+            session_id = context.get("session_id", "default_session")
+            execution_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=params.minutes_from_now)
             
-            execution_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes)
+            # 2. TULIS LOGIKA KERJA DI SINI
+            # Menyimpan snapshot dari context yang ada agar AI nanti ingat konteks tugas
+            context_snapshot = {
+                "original_session_id": session_id,
+                "priority": params.priority,
+                "scheduled_by": "system_scheduler"
+            }
             
             new_task = AutonomousTask(
                 execute_at=execution_time,
-                intent_description=intent,
+                intent_description=params.intent,
+                context_snapshot=context_snapshot,
                 status="pending"
             )
             db.add(new_task)
             db.commit()
             
-
+            # 3. Kembalikan output sesuai standar ModuleOutput V2
             return ModuleOutput(
-                status="success",
-                data={"task_id": new_task.id, "scheduled_at": str(execution_time)},
-                agent_hint=f"Tugas berhasil dijadwalkan untuk {minutes} menit lagi.",
-                thk_alignment="Palemahan"  # Tambahkan ini agar validator tidak error
+                status=200,
+                data={
+                    "task_id": new_task.id, 
+                    "scheduled_at": str(execution_time),
+                    "intent": params.intent,
+                    "session": session_id,
+                    "message": f"Tugas berhasil dijadwalkan untuk {params.minutes_from_now} menit lagi dengan prioritas {params.priority}."
+                },
+                error_msg=None
             )
+            
         except Exception as e:
+            # 4. Tangani error agar Self-Correction AI dapat mengevaluasi ulang
             print(f"[Scheduler] Error: {e}")
+            db.rollback()
             return ModuleOutput(
-                status="error",
-                data={"error": str(e)},
-                agent_hint="Gagal menjadwalkan tugas otonom. Periksa koneksi database.",
-                thk_alignment="Netral"
+                status=500,
+                data={},
+                error_msg=f"Gagal menjadwalkan tugas otonom: {str(e)}"
             )
         finally:
             db.close()
