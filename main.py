@@ -1,7 +1,7 @@
 # Central Orchestrator & Fast API
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import uvicorn
 import datetime
 import json
@@ -12,6 +12,7 @@ from core.registry import registry
 from core.base_module import ModuleOutput
 from core.database import SessionLocal, AutonomousTask, AgentMemory, AuditLog
 from core.orchestrator import PemaliOrchestrator
+import uuid
 
 app = FastAPI(title="PEMALI Communicate Layer", version="1.2")
 
@@ -23,6 +24,7 @@ class ToolCallRequest(BaseModel):
 
 class TriggerRequest(BaseModel):
     prompt: str
+    session_id: Optional[str] = None
 
 # --- Endpoints ---
 @app.get("/")
@@ -79,16 +81,19 @@ async def get_system_status():
         recent_audits = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(10).all()
         audits_list = []
         for a in recent_audits:
-            # Ambil pesan pertama user untuk judul history
-            first_msg = db.query(AgentMemory).filter(
-                AgentMemory.session_id == a.session_id,
-                AgentMemory.role == "user"
-            ).order_by(AgentMemory.created_at.asc()).first()
-            
-            title = first_msg.content[:40] + "..." if first_msg and len(first_msg.content) > 40 else (first_msg.content if first_msg else a.issue_type)
+            # Optimization: Fetch title from memory or fallback to issue_type
+            title = a.issue_type
+            if a.session_id:
+                first_msg = db.query(AgentMemory).filter(
+                    AgentMemory.session_id == a.session_id,
+                    AgentMemory.role == "user"
+                ).order_by(AgentMemory.created_at.asc()).first()
+                if first_msg:
+                    title = first_msg.content[:40] + "..." if len(first_msg.content) > 40 else first_msg.content
 
             audits_list.append({
                 "id": a.id, 
+                "session_id": a.session_id,
                 "location": a.location, 
                 "issue": title, 
                 "thk": a.thk_alignment,
@@ -145,15 +150,18 @@ async def get_session_data(session_id: Optional[str] = None):
              latest_log = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
         audit_data = None
         if latest_log:
-            # Simulate NDVI scores for the UI
+            # Extract simulated NDVI from DB metadata if available
+            ndvi_score = latest_log.metadata_json.get("ndvi_score", 0.42) if latest_log.metadata_json else 0.42
+            ndvi_change = latest_log.metadata_json.get("ndvi_change", -12.5) if latest_log.metadata_json else -12.5
+            
             audit_data = {
                 "id": latest_log.id,
                 "location": latest_log.location,
                 "issue": latest_log.issue_type,
                 "narrative": latest_log.narrative_report,
                 "thk": latest_log.thk_alignment,
-                "ndvi_score": 0.42,
-                "ndvi_change": -12.5
+                "ndvi_score": ndvi_score,
+                "ndvi_change": ndvi_change
             }
             
         # Get satellite image if available
@@ -179,8 +187,7 @@ async def get_session_data(session_id: Optional[str] = None):
         if db:
             db.close()
 
-async def run_agent_in_background(prompt: str):
-    session_id = f"audit-web-{int(datetime.datetime.now().timestamp())}"
+async def run_agent_in_background(prompt: str, session_id: str):
     agent = PemaliOrchestrator(session_id=session_id)
     try:
         await agent.run(prompt)
@@ -190,24 +197,14 @@ async def run_agent_in_background(prompt: str):
 @app.post("/api/trigger")
 async def trigger_agent(req: TriggerRequest, bg_tasks: BackgroundTasks):
     """Trigger agent logic asynchronously"""
-    bg_tasks.add_task(run_agent_in_background, req.prompt)
-    return {"status": "started"}
+    sid = req.session_id if req.session_id and req.session_id != "NEW" else f"audit-{uuid.uuid4().hex[:8]}"
+    bg_tasks.add_task(run_agent_in_background, req.prompt, sid)
+    return {"status": "started", "session_id": sid}
 
 @app.post("/api/new-session")
 async def new_session():
-    """Reset the current session — clear all agent memories and audit logs."""
-    db = SessionLocal()
-    try:
-        db.query(AgentMemory).delete()
-        db.query(AuditLog).delete()
-        db.query(AutonomousTask).filter(AutonomousTask.status == "running").update({"status": "cancelled"})
-        db.commit()
-        return {"status": "reset", "message": "Session cleared successfully"}
-    except Exception as e:
-        db.rollback()
-        return {"status": "error", "message": str(e)}
-    finally:
-        db.close()
+    """Acknowledge new session without deleting history."""
+    return {"status": "reset", "message": "Ready for new session"}
 
 if __name__ == "__main__":
     print("[System] Starting Communicate Layer...")

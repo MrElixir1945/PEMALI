@@ -43,7 +43,7 @@ async def check_and_execute_tasks():
             pending_task = db.query(AutonomousTask).filter(
                 AutonomousTask.status == "pending",
                 AutonomousTask.execute_at <= now
-            ).first()
+            ).with_for_update(skip_locked=True).first()
 
             if pending_task:
                 print(f"[Worker] Triggering Task ID: {pending_task.id} - Reason: {pending_task.intent_description}")
