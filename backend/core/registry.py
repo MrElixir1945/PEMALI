@@ -3,13 +3,13 @@ import importlib
 import inspect
 from typing import Dict, Any, List, Optional
 from pydantic import ValidationError
-from core.base_module import PemaliModuleV2, ModuleOutput
+from backend.core.base_module import PemaliModuleV2, ModuleOutput
 
 class ModuleRegistry:
     """
     Manajemen siklus hidup modul (Discovery, Validation, & Execution).
     """
-    def __init__(self, modules_dir: str = "modules"):
+    def __init__(self, modules_dir: str = "backend/modules"):
         self.modules_dir = modules_dir
         self.tools: Dict[str, PemaliModuleV2] = {}
         self.load_modules()
@@ -17,10 +17,10 @@ class ModuleRegistry:
     def load_modules(self) -> None:
         if not os.path.exists(self.modules_dir):
             os.makedirs(self.modules_dir)
-            
+
         for filename in os.listdir(self.modules_dir):
             if filename.endswith(".py") and not filename.startswith("__"):
-                module_path = f"{self.modules_dir}.{filename[:-3]}"
+                module_path = self.modules_dir.replace("/", ".").replace("\\", ".") + "." + filename[:-3]
                 try:
                     mod = importlib.import_module(module_path)
                     for _, obj in inspect.getmembers(mod):
@@ -54,7 +54,7 @@ class ModuleRegistry:
             return await tool.execute(validated_params, context)
             
         except ValidationError as ve:
-            return ModuleOutput(status=400, error_msg=f"Validation Error: {ve.json()}")
+            return ModuleOutput(status=400, error_msg=f"Validation Error: {ve.model_dump_json()}")
         except Exception as e:
             return ModuleOutput(status=500, error_msg=f"Internal Error: {str(e)}")
 

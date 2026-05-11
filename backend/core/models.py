@@ -43,6 +43,22 @@ class TelemetryEvent(BaseModel):
     state: NodeState = Field(description="State saat ini dari node tersebut")
     narrative: str = Field(description="Chain-of-Thought (CoT) atau log deskriptif untuk di-render di UI")
     timestamp: int = Field(default_factory=lambda: int(time.time()), description="Unix timestamp event terjadi")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Metadata opsional: tool_name, duration_ms, rag_sources")
+
+class ErrorResponse(BaseModel):
+    """
+    Standar response untuk error yang terstruktur.
+    Digunakan saat Sub-Agent gagal setelah max retries,
+    agar Manager tetap mendapat informasi dan bisa generate partial report.
+    """
+    status: str = Field(..., description="Status error: 'TOOL_EXECUTION_FAILED', 'TIMEOUT', 'VALIDATION_ERROR', 'UNKNOWN'")
+    step: str = Field(..., description="Langkah di mana error terjadi: 'http_request', 'tool_execution', 'parsing', dll.")
+    error_code: str = Field(..., description="Kode error spesifik: 'OPENROUTER_HTTP_500', 'SUB_AGENT_TIMEOUT', dll.")
+    context: Dict[str, Any] = Field(default_factory=dict, description="Konteks tambahan: attempts, recommendation, dll.")
+    
+    # Method helper agar bisa dipakai sebagai dict
+    def model_dump(self, **kwargs):
+        return super().model_dump(**kwargs)
 
 class SDUIConfig(BaseModel):
     """

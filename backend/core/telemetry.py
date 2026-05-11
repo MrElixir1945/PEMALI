@@ -1,12 +1,7 @@
 import asyncio
 import json
 from typing import AsyncGenerator
-from core.models import TelemetryEvent, NodeState
-
-import asyncio
-import json
-from typing import AsyncGenerator
-from core.models import TelemetryEvent
+from backend.core.models import TelemetryEvent, NodeState
 
 class TelemetryManager:
     def __init__(self):
@@ -28,7 +23,7 @@ class TelemetryManager:
 
     async def emit(self, event: TelemetryEvent):
         """Kirim event ke semua listener (seperti Dashboard)."""
-        data = event.dict()
+        data = event.model_dump()
         for queue in self.queues:
             await queue.put(data)
 
