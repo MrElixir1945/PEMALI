@@ -1,0 +1,11 @@
+<svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="600" fill="#F0EDE6"/>
+  <rect x="200" y="180" width="400" height="250" rx="12" fill="none" stroke="#D5D0C8" stroke-width="2"/>
+  <rect x="240" y="220" width="320" height="16" rx="4" fill="#D5D0C8" opacity="0.5"/>
+  <rect x="240" y="260" width="240" height="16" rx="4" fill="#D5D0C8" opacity="0.5"/>
+  <rect x="240" y="300" width="280" height="16" rx="4" fill="#D5D0C8" opacity="0.5"/>
+  <rect x="240" y="340" width="160" height="16" rx="4" fill="#D5D0C8" opacity="0.5"/>
+  <rect x="240" y="380" width="200" height="16" rx="4" fill="#D5D0C8" opacity="0.5"/>
+  <text x="400" y="480" text-anchor="middle" font-family="Georgia,serif" font-size="20" fill="#9B9690">Interaction Zone</text>
+  <text x="400" y="520" text-anchor="middle" font-family="Georgia,serif" font-size="14" fill="#B5B0AA">Replace with your image</text>
+</svg>

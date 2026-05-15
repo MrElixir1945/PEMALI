@@ -189,3 +189,67 @@ def get_memory_graph_for_session(session_id: str) -> Dict[str, Any]:
         return {"nodes": [], "edges": []}
     finally:
         db.close()
+
+
+def query_memory_graph_for_context(user_prompt: str, limit_locations: int = 5, limit_issues: int = 5) -> str:
+    """Query knowledge graph for contextual prompt injection.
+
+    Returns a formatted string summarising active locations, recurring issues,
+    and high-weight entity relations for the Manager Agent's system prompt.
+    """
+    db = SessionLocal()
+    try:
+        # Trending locations — most recently updated
+        locations = db.query(MemoryNode).filter(
+            MemoryNode.node_type == "location"
+        ).order_by(MemoryNode.last_updated.desc()).limit(limit_locations).all()
+
+        # Recurring issues — most recently updated
+        issues = db.query(MemoryNode).filter(
+            MemoryNode.node_type == "issue"
+        ).order_by(MemoryNode.last_updated.desc()).limit(limit_issues).all()
+
+        # High-weight relations — edges with weight >= 20
+        edges = db.query(MemoryEdge).filter(
+            MemoryEdge.weight >= 20
+        ).order_by(MemoryEdge.weight.desc()).limit(10).all()
+
+        # Metric trends — nodes with metrics data
+        metrics = db.query(MemoryNode).filter(
+            MemoryNode.node_type == "metric"
+        ).order_by(MemoryNode.last_updated.desc()).limit(10).all()
+
+        parts = []
+
+        if locations:
+            parts.append("Lokasi dengan audit terbaru:")
+            for loc in locations:
+                props = loc.properties or {}
+                parts.append(f"  - {loc.label} (terakhir diaudit: {loc.last_updated.strftime('%Y-%m-%d') if loc.last_updated else '-'})")
+
+        if issues:
+            parts.append("Issue lingkungan yang berulang:")
+            for iss in issues:
+                parts.append(f"  - {iss.label}")
+
+        if edges:
+            parts.append("Relasi antar entity (weight tinggi):")
+            for e in edges:
+                parts.append(f"  - {e.source_label} → {e.target_label} ({e.relation_type}, weight: {e.weight})")
+
+        if metrics:
+            parts.append("Metrik yang terpantau:")
+            for m in metrics:
+                props = m.properties or {}
+                metric_info = f"  - {m.label}"
+                if props:
+                    metric_info += f": {json.dumps(props, default=str)}"
+                parts.append(metric_info)
+
+        return "\n".join(parts) if parts else ""
+
+    except Exception as e:
+        logging.error(f"[Memory Layer] Graph Context Query Error: {str(e)}")
+        return ""
+    finally:
+        db.close()

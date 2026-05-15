@@ -1,60 +1,51 @@
 "use client";
 
 import { create } from "zustand";
-
-export interface TelemetryEvent {
-  trace_id: string;
-  node_id: string;
-  node_type: "Manager" | "SubAgent" | "Module";
-  state: "IDLE" | "THINKING" | "SPAWNING" | "EXECUTING" | "ERROR" | "DONE";
-  narrative: string;
-  timestamp: number;
-  metadata?: {
-    tool_name?: string;
-    duration_ms?: number;
-    rag_sources?: string[];
-    phase?: string;
-    status?: number;
-    error?: string;
-  };
-}
+import type { TelemetryEvent } from "@/lib/dashboard";
+export type { TelemetryEvent };
 
 interface TelemetryStore {
   events: TelemetryEvent[];
+  tokens: Record<string, string>;
   isConnected: boolean;
+  isStreaming: boolean;
   activeTraceId: string | null;
-  addEvent: (event: TelemetryEvent) => void;
-  addEvents: (events: TelemetryEvent[]) => void;
+  addEvent: (e: TelemetryEvent) => void;
+  addToken: (nodeId: string, content: string) => void;
+  clearTokens: () => void;
   clearEvents: () => void;
-  setConnected: (status: boolean) => void;
+  setConnected: (v: boolean) => void;
   setActiveTraceId: (id: string | null) => void;
+  setIsStreaming: (v: boolean) => void;
 }
 
 const MAX_EVENTS = 200;
 
 export const useTelemetryStore = create<TelemetryStore>((set) => ({
   events: [],
+  tokens: {},
   isConnected: false,
+  isStreaming: false,
   activeTraceId: null,
 
-  addEvent: (event) =>
-    set((state) => {
-      const trimmed = state.events.length >= MAX_EVENTS
-        ? state.events.slice(-(MAX_EVENTS - 1))
-        : state.events;
-      return { events: [...trimmed, event] };
+  addEvent: (e) =>
+    set((s) => {
+      const events = [...s.events, e];
+      if (events.length > MAX_EVENTS) events.shift();
+      return { events };
     }),
 
-  addEvents: (events) =>
-    set((state) => {
-      const combined = [...state.events, ...events];
-      const trimmed = combined.length > MAX_EVENTS
-        ? combined.slice(combined.length - MAX_EVENTS)
-        : combined;
-      return { events: trimmed };
-    }),
+  addToken: (nodeId, content) =>
+    set((s) => ({
+      tokens: {
+        ...s.tokens,
+        [nodeId]: (s.tokens[nodeId] ?? "") + content,
+      },
+    })),
 
+  clearTokens: () => set({ tokens: {} }),
   clearEvents: () => set({ events: [] }),
-  setConnected: (status) => set({ isConnected: status }),
+  setConnected: (v) => set({ isConnected: v }),
   setActiveTraceId: (id) => set({ activeTraceId: id }),
+  setIsStreaming: (v) => set({ isStreaming: v }),
 }));

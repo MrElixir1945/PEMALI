@@ -30,7 +30,7 @@ class MasterPlan(BaseModel):
     """
     Output utama dari Manager Agent. Berisi daftar tugas terstruktur.
     """
-    trace_id: str = Field(description="Unique identifier untuk tracing eksekusi ini")
+    trace_id: str = Field(default="", description="Unique identifier untuk tracing eksekusi ini")
     tasks: List[TaskIntent] = Field(description="Daftar task (intent) yang akan di-dispatch ke Sub-Agents")
 
 class TelemetryEvent(BaseModel):

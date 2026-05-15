@@ -1,8 +1,10 @@
-# PEMALI V2 Architecture Draft & Roadmap
+# PEMALI V2 — Architecture Draft & Roadmap
 
-> **Status:** Sprint 1 & 2 — SELESAI (35/35 test passing)  
-> **Terakhir Diupdate:** 2025-05-09  
-> **Versi:** 0.2-beta  
+> **Status:** Sprint 1 & 2 — SELESAI | Sprint 3 — SEBAGIAN BESAR SELESAI | Sprint 4 — PLANNED  
+> **Test:** 43/43 passing  
+> **Branch:** `fitur/new-baseline`  
+> **Terakhir Diupdate:** 2026-05-11  
+> **Versi:** 0.3-beta
 
 ---
 
@@ -12,219 +14,185 @@ Platform audit lingkungan otonom berbasis AI yang **transparan**, **dapat belaja
 
 ---
 
-## 2. Progres Implementasi
+## 2. Struktur Proyek (Current)
+
+```
+pemali/
+├── backend/
+│   ├── main.py                    # FastAPI entry point
+│   ├── worker.py                  # Tick engine daemon
+│   ├── requirements.txt           # Pinned dependencies
+│   ├── core/
+│   │   ├── base_module.py         # PemaliModuleV2 ABC
+│   │   ├── database.py            # SQLAlchemy ORM models
+│   │   ├── memory.py              # ChromaDB RAG + Graph CRUD
+│   │   ├── memory_processor.py    # TemporalPatternExtractor + KG Builder
+│   │   ├── models.py              # Pydantic schemas (TelemetryEvent, ErrorResponse, SDUIConfig)
+│   │   ├── orchestrator.py        # PemaliOrchestrator + SubAgent (507 lines)
+│   │   ├── registry.py            # Module auto-discovery
+│   │   └── telemetry.py           # SSE event manager
+│   ├── modules/
+│   │   ├── mock_module.py         # MockDataGenerator (testing)
+│   │   └── scheduler_mod.py       # SystemSchedulerModule
+│   └── tests/
+│       ├── test_dag_stress.py     # 20 tests — topology, scoped tools, error handling
+│       ├── test_cognitive_memory.py # 15 tests — extractor, builder, graph CRUD
+│       └── test_narrative.py      # 8 tests — TelemetryEvent, NarrativeContract, duration tracking
+├── frontend/
+│   └── src/
+│       ├── app/                   # Next.js App Router pages
+│       ├── components/pemali/     # NarrativeCard, NarrativeStream, DAGViewer
+│       └── stores/               # Zustand telemetryStore
+├── config/
+│   ├── .env                       # (gitignored)
+│   └── .env.example               # Template konfigurasi
+├── docs/
+│   ├── DRAFT_ARCHITECTURE.md      # Dokumen ini
+│   ├── draft/                     # Draft spesifikasi upcoming
+│   └── guides/                    # Development & module guides
+├── infra/                         # Docker Compose, dev scripts
+├── tools/                         # TUI chat & monitor
+└── .gitignore
+```
+
+---
+
+## 3. Progres Implementasi
 
 ### Sprint 1: Stabilisasi — ✅ SELESAI (20/20 test)
 
-| # | Perbaikan | Status | File | Test |
-|---|-----------|--------|------|------|
-| 1 | **Error Handling Robust** — `ErrorResponse` model, `execute_with_safety()`, timeout 45s | ✅ Done | `core/models.py`, `core/orchestrator.py` | `test_dag_stress.py` |
-| 2 | **Scoped Tool Registry** — Sub-Agent hanya lihat tools domain-nya | ✅ Done | `core/orchestrator.py` | `test_dag_stress.py` |
-| 3 | **DAG Stress Test** — 5+ node dependen, deadlock detection, parallel siblings | ✅ Done | `tests/test_dag_stress.py` | 20 test |
-| 4 | **Shared Context Handler** — Error task disimpan sebagai `_ERROR_` marker | ✅ Done | `core/orchestrator.py` | `test_dag_stress.py` |
-| 5 | **Synthesis with Failures** — Partial report tetap informatif | ✅ Done | `core/orchestrator.py` | `test_dag_stress.py` |
+| # | Perbaikan | Selesai |
+|---|-----------|---------|
+| 1 | ErrorResponse model + execute_with_safety() + timeout 45s | ✅ |
+| 2 | Scoped Tool Registry (get_scoped_manifests per domain) | ✅ |
+| 3 | DAG Stress Test (5+ node dependen, deadlock, parallel) | ✅ |
+| 4 | Shared Context Handler (_ERROR_ marker) | ✅ |
+| 5 | Synthesis with Failures (partial report informatif) | ✅ |
 
 ### Sprint 2: Cognitive Memory Engine — ✅ SELESAI (15/15 test)
 
-| # | Komponen | Status | File | Test |
-|---|----------|--------|------|------|
-| 1 | **TemporalPatternExtractor** — Ekstrak pola temporal dari hasil audit | ✅ Done | `core/memory_processor.py` | `test_cognitive_memory.py` |
-| 2 | **KnowledgeGraphBuilder** — Bangun node & edge relasi | ✅ Done | `core/memory_processor.py` | `test_cognitive_memory.py` |
-| 3 | **Knowledge Graph Tables** — `memory_nodes` + `memory_edges` di PostgreSQL | ✅ Done | `core/database.py` | `test_cognitive_memory.py` |
-| 4 | **Graph CRUD** — `insert_memory_graph()`, `query_memory_graph()` | ✅ Done | `core/memory.py` | `test_cognitive_memory.py` |
-| 5 | **Orchestrator Integration** — Ekstrak pattern setelah audit selesai | ✅ Done | `core/orchestrator.py` | Manual test |
+| # | Komponen | Selesai |
+|---|----------|---------|
+| 1 | TemporalPatternExtractor | ✅ |
+| 2 | KnowledgeGraphBuilder | ✅ |
+| 3 | memory_nodes + memory_edges tables | ✅ |
+| 4 | Graph CRUD (insert, query, get_by_session) | ✅ |
+| 5 | Orchestrator Integration (extract pattern post-audit) | ✅ |
 
-**Total:** 35/35 test passing ✅
+### Sprint 3: Narrative + SDUI + Telemetry — 🔶 SEBAGIAN BESAR SELESAI
 
----
+| # | Task | Status | File |
+|---|------|--------|------|
+| 1 | TelemetryEvent.metadata field | ✅ | `core/models.py` |
+| 2 | .dict() → .model_dump() di telemetry | ✅ | `core/telemetry.py` |
+| 3 | SubAgent NARRATIVE CONTRACT prompt | ✅ | `core/orchestrator.py:105-130` |
+| 4 | Duration tracking (time.monotonic()) | ✅ | `core/orchestrator.py:258-278` |
+| 5 | RAG context injection di Manager prompt | ✅ | `core/orchestrator.py:307-311` |
+| 6 | Manager Agent NARRATIVE CONTRACT prompt | ❌ | Belum (desain sudah dibahas) |
+| 7 | NarrativeStream.tsx (SSE consumer) | ✅ | `frontend/src/components/pemali/` |
+| 8 | NarrativeCard.tsx (event card) | ✅ | `frontend/src/components/pemali/` |
+| 9 | DAGViewer.tsx (SVG visualizer) | ✅ | `frontend/src/components/pemali/` |
+| 10 | telemetryStore.ts (Zustand) | ✅ | `frontend/src/stores/` |
+| 11 | test_narrative.py | ✅ | 8/8 pass |
+| 12 | AgentCard.tsx | ❌ | Belum |
+| 13 | TelemetryFeed.tsx | ❌ | Belum (digantikan NarrativeStream) |
+| 14 | ModuleOutput.tsx (SDUI render) | ❌ | Belum |
+| 15 | ChatInput.tsx | ❌ | Inline di dashboard |
+| 16 | CSS tokens PEMALI di globals.css | ❌ | Belum (komponen pakai var(--pemali-*) tapi tidak didefinisikan) |
+| 17 | Wire komponen ke dashboard page | ❌ | Belum |
 
-## 3. Temuan & Arsitektur Tertangani
+**Test:** 43/43 passing (20 Sprint 1 + 15 Sprint 2 + 8 Sprint 3)
 
-### 3.1 Masalah Critical — SUDAH DIPERBAIKI
+### Sprint 4: Module Development — ❌ BELUM DIMULAI
 
-| # | Masalah Sebelumnya | Fix Yang Diimplementasi | Status |
-|---|-------------------|-----------------------|--------|
-| 1 | `raise he` crash orchestrator | `ErrorResponse` terstruktur + `execute_with_safety()` | ✅ Fixed |
-| 2 | Error return jadi `{}` di Manager | `_ERROR_` marker di `shared_context` | ✅ Fixed |
-| 3 | Sub-Agent bawa SEMUA tools | `get_scoped_manifests()` per domain | ✅ Fixed |
-| 4 | Shared context rapuh | Error metadata + partial report | ✅ Fixed |
-| 5 | RAG tidak belajar | `TemporalPatternExtractor` + `KnowledgeGraphBuilder` | ✅ Fixed |
+| # | Module | Status |
+|---|--------|--------|
+| 1 | geo_module.py (geo_sensor) | ❌ |
+| 2 | water_module.py (water_quality) | ❌ |
+| 3 | fire_module.py (fire_hotspot) | ❌ |
+| 4 | osint_module.py (osint_news) | ❌ |
 
----
+**Impact:** Tanpa module ini, `geo_agent`, `water_agent`, `fire_agent`, `osint_agent` dapat tools kosong → timeout 45s → error.
 
-## 4. Rancangan Sprint 3: SDUI + Telemetry Narrative (Fase 4 Awal)
+### Sprint 4b: Knowledge Graph RAG Integration — ❌ BELUM DIMULAI
 
-### 4.1 Sistem Narasi Transparan (Prompt Contracts)
-
-**Manager Agent Prompt (`system_prompt`) di `core/orchestrator.py`:**
-
-```
-[PEMALI NARRATIVE CONTRACT v1]
-
-Anda adalah MANAGER AGENT. Tugas: analisis, delegasi, sintesis.
-
-SEBELUM setiap aksi:
-  EMIT TelemetryEvent dengan narrative bahasa manusia.
-  Ceritakan: apa yang Anda pikirkan, kenapa memutuskan demikian.
-
-FORMAT NARRATIVE (untuk user):
-"🧠 Manager Agent sedang berpikir: Berdasarkan memori audit sebelumnya 
-di Gianyar... Saya mendeteksi pola deforestasi di musim kemarau. 
-Saya akan prioritaskan pengumpulan data NDVI."
-
-FORMAT TEKNIS (output JSON tetap sama):
-{'trace_id': '...', 'tasks': [...]}
-```
-
-**Sub-Agent Prompt (`system_prompt`):**
-
-```
-[PEMALI NARRATIVE CONTRACT v1]
-
-Anda adalah {target_agent}. Tugas: {intent}.
-
-SEBELUM memilih tools:
-  EMIT: "Saya sedang mempertimbangkan tools mana yang paling sesuai..."
-
-SEBELUM eksekusi tools:
-  EMIT: "Saya menggunakan [tool_name] untuk [tujuan]..."
-
-SAAT error:
-  EMIT: "Terjadi masalah saat [tool_name]: [ringkasan error]. 
-         Saya akan mencoba koreksi dengan [strategi]."
-
-FORMAT TEKNIS: function-calling JSON standard
-```
-
-### 4.2 Server-Driven UI (SDUI)
-
-**Backend: `ModuleOutput` dengan `SDUIConfig`**
-
-```python
-class ModuleOutput(BaseModel):
-    status: int
-    data: Dict[str, Any]
-    error_msg: Optional[str] = None
-    sdui_config: Optional[SDUIConfig] = None  # ← TAMBAH INI
-
-class SDUIConfig(BaseModel):
-    ui_type: str        # 'metric_card', 'map_layer', 'data_table', 'timeline_plot'
-    position: str       # 'full_width', 'half_width', 'sidebar'
-    theme: str          # 'default', 'alert_red', 'warning_amber', 'success_green'
-    refresh_rate_ms: int = 5000
-```
-
-**Frontend: Component Mapping**
-
-| `ui_type` | React Component | Library |
-|-----------|----------------|---------|
-| `metric_card` | `<MetricCard />` | Tailwind + Framer Motion |
-| `map_layer` | `<LeafletMapLayer />` | react-leaflet |
-| `data_table` | `<DataTable />` | TanStack Table |
-| `timeline_plot` | `<RechartsTimeline />` | Recharts |
-| `telemetry_chart` | `<RealTimeChart />` | Recharts + SSE |
-
-### 4.3 Frontend Component: NarrativeStream
-
-```tsx
-// frontend/src/components/NarrativeStream.tsx
-interface TelemetryEvent {
-  trace_id: string;
-  node_id: string;
-  node_type: 'Manager' | 'SubAgent' | 'Module';
-  state: 'THINKING' | 'SPAWNING' | 'EXECUTING' | 'ERROR' | 'DONE';
-  narrative: string;        // Narasi bahasa manusia
-  timestamp: number;
-  metadata?: {
-    tools_used?: string[];
-    sub_agents_spawned?: string[];
-    rag_sources?: string[];
-  }
-}
-```
-
-**SSE Wiring:**
-```typescript
-const eventSource = new EventSource('/api/telemetry?trace_id=' + traceId);
-eventSource.onmessage = (e) => {
-  const data: TelemetryEvent = JSON.parse(e.data);
-  setEvents(prev => [...prev, data]);
-};
-```
+`query_memory_graph()` ada di `core/memory.py` tapi tidak pernah dipanggil di production. Data PostgreSQL (`memory_nodes` + `memory_edges`) masuk tapi tidak dibaca.
 
 ---
 
-## 5. Rencana Implementasi Sprint 3 (1-2 minggu)
+## 4. Backend Fixes (2026-05-11)
 
-| Hari | Tugas | File | Estimasi |
-|------|-------|------|----------|
-| 1 | Implement narrative prompt contracts di Manager/Sub-Agent | `core/orchestrator.py` | 4h |
-| 1 | Tambah `TelemetryEvent.metadata` field untuk tracking tools | `core/models.py` | 1h |
-| 2 | Implement `NarrativeStream.tsx` component + styling | `frontend/src/components/` | 6h |
-| 2 | Create `NarrativeCard.tsx` sub-component (yellow/blue cards) | `frontend/src/components/` | 3h |
-| 3 | Wire SSE `/api/telemetry` ke frontend | `frontend/src/app/dashboard/page.tsx` | 4h |
-| 3 | Add reconnection logic + buffer management (200 events) | `frontend/src/components/` | 3h |
-| 4 | Write `MODULE_V2_GUIDE.md` dengan SDUI example | `docs/MODULE_V2_GUIDE.md` | 4h |
-| 4 | Update `MODULE_TEMPLATE.md` dengan SDUI config | `MODULE_TEMPLATE.md` | 2h |
-| 5 | Integration test: Full flow dari prompt → finish dengan SSE | `tests/` | 6h |
+| # | Fix | File |
+|---|-----|------|
+| 1 | Module path slash → dot notation | `core/registry.py:23` |
+| 2 | Missing `__init__.py` di semua package | `backend/`, `core/`, `modules/`, `tests/` |
+| 3 | load_dotenv() path absolute | `main.py:23`, `core/database.py:8` |
+| 4 | Test patch paths (core. → backend.core.) | `tests/test_narrative.py:102,136` |
+| 5 | Pydantic .json() → .model_dump_json() | `core/registry.py:57` |
+| 6 | Naive datetime → UTC | `main.py:103` |
+| 7 | init_db() di test cognitive memory | `tests/test_cognitive_memory.py` |
+| 8 | SQLAlchemy declarative_base() deprecated | `core/database.py:4` |
+| 9 | ChromaDB path absolute | `core/memory.py:9` |
+| 10 | allow_reset=True → False | `core/memory.py:14` |
+| 11 | Logging model load + collection ready | `core/memory.py:18,24` |
+| 12 | Fix venv pip script path | `backend/.venv/bin/pip*` |
+| 13 | requirements.txt moved + pinned + pytest | `backend/requirements.txt` |
+| 14 | .gitignore robust | `.gitignore` → `**/venv/`, `**/.venv/`, `.opencode/`, `graphify-out/` |
 
 ---
 
-## 6. Risiko & Mitigasi
+## 5. Masalah Tertangani
+
+| # | Masalah Sebelumnya | Fix | Status |
+|---|-------------------|-----|--------|
+| 1 | `raise he` crash orchestrator | ErrorResponse + execute_with_safety() | ✅ |
+| 2 | Error return jadi `{}` di Manager | _ERROR_ marker di shared_context | ✅ |
+| 3 | Sub-Agent bawa SEMUA tools | get_scoped_manifests() per domain | ✅ |
+| 4 | Shared context rapuh | Error metadata + partial report | ✅ |
+| 5 | RAG tidak belajar | TemporalPatternExtractor + KnowledgeGraphBuilder | ✅ |
+| 6 | Module registry tidak load module | slash → dot notation | ✅ |
+| 7 | load_dotenv gagal dari subdirectory | path absolute | ✅ |
+| 8 | API key OpenRouter terekspos di repo | `**/.env` di .gitignore | ✅ |
+| 9 | ChromaDB path inconsistent | path absolute | ✅ |
+| 10 | allow_reset=True (dangerous) | allow_reset=False | ✅ |
+| 11 | pip script broken di venv | fix shebang path | ✅ |
+
+---
+
+## 6. Masalah Known (Belum Diatasi)
+
+| # | Masalah | Dampak | Sprint |
+|---|---------|--------|--------|
+| 1 | Manager prompt belum NARRATIVE CONTRACT | Manager tidak "bercerita" di SSE | Sprint 3 pending |
+| 2 | 4 module (geo, water, fire, osint) tidak ada | Agent dapat tools kosong → timeout | Sprint 4 |
+| 3 | query_memory_graph() tidak dipakai di production | Knowledge graph tidak untuk decision-making | Sprint 4b |
+| 4 | No deduplication di insert_memory_graph() | Bisa duplicate nodes | Sprint 4b |
+| 5 | CSS tokens PEMALI tidak didefinisikan | Komponen frontend render dengan fallback | Frontend |
+| 6 | 4 komponen frontend belum ada | AgentCard, TelemetryFeed, ModuleOutput, ChatInput | Frontend |
+| 7 | Embedding model mismatch | AGENTS.md vs implementasi (beda dimensi) | Migration |
+
+---
+
+## 7. Prioritas Ke Depan
+
+1. **Sprint 3 sisa** — Manager Agent prompt (NARRATIVE CONTRACT + narasi)
+2. **Sprint 4** — 4 module mock (geo, water, fire, osint) agar agent flow jalan
+3. **Sprint 4b** — Knowledge Graph RAG (query_memory_graph ke prompt)
+4. **Frontend** — CSS tokens, missing components, wire ke dashboard
+5. **Sprint 4c** — Ganti mock data ke real API
+
+---
+
+## 8. Risiko & Mitigasi
 
 | Risiko | Mitigasi | Prioritas |
 |--------|---------|-----------|
-| OpenRouter rate limit / downtime | Fallback queue + exponential backoff (sudah basic retry) | 🟡 Medium |
-| ChromaDB corruption | Backup collection sebelum operasi besar | 🟡 Medium |
-| Telemetry text overflow (frontend) | Virtual scrolling + max 200 events + debounce | 🔴 High |
-| Komunitas bingung dengan V2 standard | `MODULE_V2_GUIDE.md` + example repo | 🔴 High |
+| OpenRouter rate limit / downtime | Retry + exponential backoff | 🟡 Medium |
+| Agent timeout karena tools kosong | Sprint 4 — module mock | 🔴 High |
+| Knowledge graph data masuk tapi tidak dibaca | Sprint 4b — integrasi query | 🟡 Medium |
+| Frontend CSS tokens missing | Sprint 3 sisa — define tokens | 🟡 Medium |
+| Model embedding mismatch | Migration plan jika ganti model | 🟢 Low |
 
 ---
 
-## 7. File yang Sudah Dibuat/Diubah
-
-| File | Status | Tujuan |
-|------|--------|--------|
-| `core/models.py` | ✅ Modified | `ErrorResponse`, `TelemetryEvent` |
-| `core/orchestrator.py` | ✅ Modified | Error handling, scoped tools, cognitive memory |
-| `core/database.py` | ✅ Modified | `MemoryNode`, `MemoryEdge` tables |
-| `core/memory.py` | ✅ Modified | Graph CRUD: `insert_memory_graph()`, `query_memory_graph()` |
-| `core/memory_processor.py` | ✅ **NEW** | `TemporalPatternExtractor`, `KnowledgeGraphBuilder` |
-| `tests/test_dag_stress.py` | ✅ **NEW** | 20 tests: topology, scoped tools, error handling |
-| `tests/test_cognitive_memory.py` | ✅ **NEW** | 15 tests: extractor, builder, graph CRUD |
-| `DRAFT_ARCHITECTURE.md` | ✅ Updated | Dokumentasi roadmap |
-
----
-
-## 8. Catatan Diskusi Penting
-
-### RAG vs Cognitive Memory
-> RAG saat ini "sampah" — AI hanya text matching, tidak belajar.
-
-**Status:** ✅ **TERATASI**
-- `TemporalPatternExtractor` → ekstrak pola temporal (seasonality, anomaly, tren)
-- `KnowledgeGraphBuilder` → bangun node/edge relasi entity
-- AI kini melihat **pola** bukan hanya teks mentah
-
-### Scoped Tools vs Global Tools
-> Sub-Agent bawa semua tools = token waste & security risk.
-
-**Status:** ✅ **TERATASI**
-- `get_scoped_manifests()` → filter per domain (geo, water, fire, osint)
-- Agent hanya lihat tools yang relevan
-
----
-
-## 9. Action Items Checklist — Sprint 3
-
-- [ ] **Implement narrative prompt contracts** (Day 1)
-- [ ] **Add metadata field ke TelemetryEvent** (Day 1)
-- [ ] **Build NarrativeStream.tsx + NarrativeCard.tsx** (Day 2)
-- [ ] **Wire SSE telemetry ke frontend** (Day 3)
-- [ ] **Add virtual scrolling + buffer management** (Day 3)
-- [ ] **Write MODULE_V2_GUIDE.md** (Day 4)
-- [ ] **Integration test: Full flow with SSE** (Day 5)
-
----
-
-*Dokumen ini akan terus diperbarui sesuai progress Sprint 3.*
+*Dokumen diperbarui: 2026-05-11. Branch: fitur/new-baseline.*

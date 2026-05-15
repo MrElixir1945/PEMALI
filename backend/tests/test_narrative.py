@@ -8,6 +8,7 @@ import os
 import time
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from openai import APIError, APIConnectionError
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -69,7 +70,7 @@ class TestNarrativeContract:
         with open(orchestrator_path) as f:
             source = f.read()
         assert "NARRATIVE CONTRACT" in source
-        assert "ATURAN STATE MACHINE" in source
+        assert "ATURAN EKSEKUSI" in source
         assert "ATURAN NARASI" in source
         assert "ATURAN KOREKSI DIRI" in source
 
@@ -188,6 +189,187 @@ class TestSSESerialization:
 
 
 # ============================================================
+# ERROR PATH TESTS — Retry, Self-Correction, Timeout
+# ============================================================
+
+class TestErrorPathSSE:
+    """Verify SSE emissions for error handling in SubAgent."""
+
+    @classmethod
+    def _import_subagent(cls):
+        import sys
+        mock_memory = MagicMock()
+        sys.modules["core.memory"] = mock_memory
+        mock_processor = MagicMock()
+        sys.modules["core.memory_processor"] = mock_processor
+        from backend.core.orchestrator import SubAgent
+        return SubAgent
+
+    def _make_task(self, task_id: str = "t1", target: str = "geo_agent"):
+        from backend.core.models import TaskIntent
+        return TaskIntent(
+            task_id=task_id, target_agent=target,
+            intent="test intent", parameters={}
+        )
+
+    def _make_mock_openai(self, content: str = "", tool_calls: list | None = None):
+        msg = MagicMock()
+        msg.content = content
+        if tool_calls:
+            mock_tcs = []
+            for tc in tool_calls:
+                mtc = MagicMock()
+                mtc.id = tc.get("id", "call_1")
+                mtc.index = tc.get("index", 0)
+                mtc.function = MagicMock()
+                mtc.function.name = tc["function"]["name"]
+                mtc.function.arguments = tc["function"]["arguments"]
+                mock_tcs.append(mtc)
+            msg.tool_calls = mock_tcs
+        return msg
+
+    @patch("backend.core.orchestrator.registry")
+    @patch("backend.core.orchestrator.telemetry")
+    def test_llm_http_error_emits_error_and_retry(self, mock_telemetry, mock_registry):
+        SubAgent = self._import_subagent()
+        llm = AsyncMock()
+        create_mock = AsyncMock()
+        create_mock.side_effect = [
+            APIConnectionError(message="502 Bad Gateway", request=MagicMock()),
+            MagicMock(choices=[MagicMock(message=self._make_mock_openai(
+                "Saya akan menggunakan mock_data_generator",
+                [{"id": "call_1", "type": "function", "function": {"name": "mock_data_generator", "arguments": "{}"}}]
+            ))]),
+        ]
+        llm.chat = MagicMock(completions=MagicMock(create=create_mock))
+
+        mock_registry.execute_tool = AsyncMock()
+        mock_registry.execute_tool.return_value = MagicMock(model_dump=lambda: {"status": 200, "data": {"result": "ok"}})
+
+        with patch("backend.core.orchestrator.get_llm_client", return_value=llm):
+            mock_emit = AsyncMock()
+            mock_telemetry.emit = mock_emit
+            telemetry.queues.clear()
+            agent = SubAgent(self._make_task("t-retry"), "session_1", [{"type": "function", "function": {"name": "mock_data_generator"}}], "tr-retry")
+            agent.headers = {}
+            result = asyncio.run(agent.execute())
+
+        emit_calls = mock_emit.call_args_list
+        narratives = [c[0][0].narrative for c in emit_calls]
+        llm_narratives = [n for n in narratives if "mock_data_generator" in n]
+        assert len(llm_narratives) >= 1, f"Expected LLM narrative, got all: {narratives}"
+
+    @patch("backend.core.orchestrator.registry")
+    @patch("backend.core.orchestrator.telemetry")
+    def test_llm_http_error_exhausts_retries(self, mock_telemetry, mock_registry):
+        SubAgent = self._import_subagent()
+        llm = AsyncMock()
+        create_mock = AsyncMock()
+        create_mock.side_effect = [
+            APIConnectionError(message="503 Service Unavailable", request=MagicMock()),
+            APIConnectionError(message="503 Service Unavailable", request=MagicMock()),
+            APIConnectionError(message="503 Service Unavailable", request=MagicMock()),
+        ]
+        llm.chat = MagicMock(completions=MagicMock(create=create_mock))
+
+        with patch("backend.core.orchestrator.get_llm_client", return_value=llm):
+            mock_emit = AsyncMock()
+            mock_telemetry.emit = mock_emit
+            telemetry.queues.clear()
+            agent = SubAgent(self._make_task("t-exhaust"), "session_1", [], "tr-exhaust")
+            agent.headers = {}
+            result = asyncio.run(agent.execute())
+
+        emit_calls = mock_emit.call_args_list
+        error_events = [c[0][0] for c in emit_calls if c[0][0].state == NodeState.ERROR]
+        assert len(error_events) >= 1, f"Expected ERROR events, got: {[c[0][0].state for c in emit_calls]}"
+        assert isinstance(result, dict) and "status" in result
+
+    @patch("backend.core.orchestrator.registry")
+    @patch("backend.core.orchestrator.telemetry")
+    def test_module_error_triggers_self_correction(self, mock_telemetry, mock_registry):
+        SubAgent = self._import_subagent()
+        llm = AsyncMock()
+        create_mock = AsyncMock()
+        create_mock.return_value = MagicMock(choices=[MagicMock(message=self._make_mock_openai(
+            "Mencoba mock_data_generator",
+            [{"id": "call_1", "type": "function", "function": {"name": "mock_data_generator", "arguments": "{}"}}]
+        ))])
+        llm.chat = MagicMock(completions=MagicMock(create=create_mock))
+
+        mock_registry.execute_tool = AsyncMock()
+        mock_registry.execute_tool.side_effect = [
+            MagicMock(model_dump=lambda: {"status": 400, "error_msg": "Invalid params"}),
+            MagicMock(model_dump=lambda: {"status": 200, "data": {"ok": True}}),
+        ]
+
+        with patch("backend.core.orchestrator.get_llm_client", return_value=llm):
+            mock_emit = AsyncMock()
+            mock_telemetry.emit = mock_emit
+            telemetry.queues.clear()
+            agent = SubAgent(self._make_task("t-self"), "session_1", [{"type": "function", "function": {"name": "mock_data_generator"}}], "tr-sc")
+            agent.headers = {}
+            result = asyncio.run(agent.execute())
+
+        emit_calls = mock_emit.call_args_list
+        states = [c[0][0].state for c in emit_calls]
+        thinking_count = states.count(NodeState.THINKING)
+        assert thinking_count >= 2, f"Expected ≥2 THINKING (initial+retry), got: {states}"
+        assert NodeState.DONE in states, f"Expected DONE after retry, got: {states}"
+
+    @patch("backend.core.orchestrator.registry")
+    @patch("backend.core.orchestrator.telemetry")
+    def test_module_error_exhausts_returns_results(self, mock_telemetry, mock_registry):
+        SubAgent = self._import_subagent()
+        llm = AsyncMock()
+        create_mock = AsyncMock()
+        create_mock.return_value = MagicMock(choices=[MagicMock(message=self._make_mock_openai(
+            "Mencoba mock_data_generator lagi",
+            [{"id": "call_1", "type": "function", "function": {"name": "mock_data_generator", "arguments": "{}"}}]
+        ))])
+        llm.chat = MagicMock(completions=MagicMock(create=create_mock))
+
+        mock_registry.execute_tool = AsyncMock()
+        mock_registry.execute_tool.return_value = MagicMock(model_dump=lambda: {"status": 500, "error_msg": "Internal failure"})
+
+        with patch("backend.core.orchestrator.get_llm_client", return_value=llm):
+            mock_emit = AsyncMock()
+            mock_telemetry.emit = mock_emit
+            telemetry.queues.clear()
+            agent = SubAgent(self._make_task("t-exh-mod"), "session_1", [{"type": "function", "function": {"name": "mock_data_generator"}}], "tr-exh")
+            agent.headers = {}
+            result = asyncio.run(agent.execute())
+
+        assert isinstance(result, dict)
+        assert "results" in result, f"Expected results dict, got: {result}"
+        assert "agent" in result
+
+    @patch("backend.core.orchestrator.telemetry")
+    def test_llm_responds_without_tool_emits_thinking_and_done(self, mock_telemetry):
+        SubAgent = self._import_subagent()
+        llm_content = "Saya tidak perlu tool. Data sudah cukup."
+        llm = AsyncMock()
+        create_mock = AsyncMock()
+        create_mock.return_value = MagicMock(choices=[MagicMock(message=self._make_mock_openai(llm_content))])
+        llm.chat = MagicMock(completions=MagicMock(create=create_mock))
+
+        with patch("backend.core.orchestrator.get_llm_client", return_value=llm):
+            mock_emit = AsyncMock()
+            mock_telemetry.emit = mock_emit
+            telemetry.queues.clear()
+            agent = SubAgent(self._make_task("t-no-tool"), "session_1", [], "tr-notool")
+            agent.headers = {}
+            result = asyncio.run(agent.execute())
+
+        emit_calls = mock_emit.call_args_list
+        states = [c[0][0].state for c in emit_calls]
+        assert NodeState.THINKING in states, f"Expected THINKING, got: {states}"
+        assert NodeState.DONE in states, f"Expected DONE, got: {states}"
+        thinking_evt = [c[0][0] for c in emit_calls if c[0][0].state == NodeState.THINKING][0]
+        assert "Saya tidak perlu tool" in thinking_evt.narrative, f"Expected LLM narrative, got: {thinking_evt.narrative}"
+
+
+# ============================================================
 # RUNNER
 # ============================================================
 
@@ -200,6 +382,7 @@ if __name__ == "__main__":
         TestNarrativeContract,
         TestDurationTracking,
         TestSSESerialization,
+        TestErrorPathSSE,
     ]
 
     for cls in test_classes:

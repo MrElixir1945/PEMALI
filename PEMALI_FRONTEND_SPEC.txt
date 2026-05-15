@@ -1,0 +1,561 @@
+================================================================================
+PEMALI V2 — FULL SYSTEM SPEC FOR FRONTEND REDESIGN
+================================================================================
+Dibuat: 15 Mei 2026
+Tujuan: Brief lengkap untuk redesign frontend dashboard PEMALI.
+         Backend TIDAK disentuh — semua perubahan di frontend.
+================================================================================
+
+================================================================================
+1. PROJECT OVERVIEW
+================================================================================
+
+PEMALI adalah sistem multi-agent audit lingkungan Bali.
+User kirim prompt → Manager Agent rencana → Sub-Agent eksekusi tool →
+data dikumpulin → Manager sintesis laporan final.
+
+Stack:
+  Backend  → FastAPI (Python), OpenRouter LLM, PostgreSQL, ChromaDB
+  Frontend → Next.js 15 (App Router), TypeScript, Zustand, Framer Motion
+  SSE      → Real-time streaming backend → frontend
+
+File utama:
+  backend/core/orchestrator.py    — Manager + SubAgent + 4-fase pipeline
+  backend/core/models.py          — Pydantic models (TelemetryEvent, dll)
+  backend/core/telemetry.py       — SSE emitter
+  backend/main.py                 — FastAPI routes: POST /api/stream, GET /api/telemetry
+  frontend/src/app/dashboard/page.tsx  — 2203 baris, SEMUA komponen di sini
+  frontend/src/app/dashboard/page.backup.tsx — backup sebelum 4-fase refactor
+
+================================================================================
+2. HOW BACKEND SENDS DATA TO FRONTEND
+================================================================================
+
+2.1 Endpoint: POST /api/stream
+    Body: { "prompt": "Audit lingkungan Gianyar..." }
+    Response: text/event-stream (SSE)
+
+2.2 SSE Format
+    Dua tipe event, dibedakan oleh field "event:":
+
+    a) event: state   → TelemetryEvent (perubahan state agent/node)
+       Format:  event: state\n
+                data: {json}\n
+                \n
+
+    b) event: token   → TokenEvent (LLM streaming token)
+       Format:  event: token\n
+                data: {json}\n
+                \n
+
+2.3 State Event Structure (TelemetryEvent)
+    {
+      "trace_id": "tr-abcd1234",        // ID sesi
+      "node_id": "manager",             // ID node: "manager" | "geo_agent" | "water_agent" | tool_name
+      "node_type": "Manager",           // "Manager" | "SubAgent" | "Module" | "System"
+      "state": "THINKING",              // "IDLE" | "THINKING" | "SPAWNING" | "EXECUTING" | "DONE" | "ERROR"
+      "narrative": "Menganalisis...",   // Teks narasi dari LLM / orchestrator
+      "timestamp": 1715702400,          // Unix epoch seconds
+      "metadata": {                     // Opsional, tergantung konteks
+        "phase": "planning",            // Fase Manager: "planning"|"execute"|"validate"|"synthesis"|"done"
+        "phase_step": "spawning",       // Sub-step: "spawning"|"progress"|"complete"|"checking"|"anomaly"|"re-spawn"|"re-spawn-done"|"valid"
+        "task_count": 4,                // Jumlah agent yang di-spawn (execute spawning)
+        "success_count": 3,             // Agent sukses (execute progress)
+        "fail_count": 1,
+        "done": ["geo_agent"],          // Agent yang sudah DONE (execute progress)
+        "pending": ["water_agent"],     // Agent yang masih running (execute progress)
+        "agent": "water_agent",         // Agent anomali (validate)
+        "reason": "empty_data",         // Alasan anomaly (validate)
+        "attempt": 1,                   // Re-spawn attempt (validate)
+        "status": "success",            // "success"|"failed" (validate re-spawn)
+        "type": "final_report",         // Tipe event (done)
+        "session_id": "sess-..."        // Session ID (done, execute)
+      }
+    }
+
+2.4 Token Event Structure
+    {
+      "node_id": "manager",             // Agent mana yang ngomong
+      "content": "Berdasarkan data..."  // Chunk token dari LLM
+    }
+
+2.5 Complete Manager Event Sequence (per audit session)
+
+FASE 1 — PLANNING (phase: "planning")
+  event: state | node_id:"manager" | state:THINKING | phase:"planning"
+  → "Menganalisis permintaan user untuk audit Gianyar..."
+  → Node: LLM call ke OpenRouter dengan tool create_audit_plan
+  → Output: MasterPlan (daftar task + sub-agent yang harus dijalankan)
+
+FASE 2 — EXECUTE (phase: "execute")
+  event: state | node_id:"manager" | state:THINKING | phase:"execute" | phase_step:"spawning" | task_count:N
+  → "Menjalankan N agent: geo_agent, fire_agent, ..."
+
+  // Sub-agents run (parallel atau sekuensial via DAG)
+  // Per sub-agent:
+  event: state | node_id:"geo_agent" | node_type:"SubAgent" | state:THINKING
+  → narasi dari LLM sub-agent
+  event: state | node_id:"geo_agent" | state:EXECUTING
+  → "Menjalankan tool: mock_data_generator..."
+  event: state | node_id:"mock_data_generator" | node_type:"Module" | state:EXECUTING
+  event: state | node_id:"mock_data_generator" | state:DONE | metadata:{duration_ms, tool_name}
+  event: state | node_id:"geo_agent" | state:DONE
+
+  // Setiap sub-agent DONE → Manager progress:
+  event: state | node_id:"manager" | state:THINKING | phase:"execute" | phase_step:"progress" | done:[...] | pending:[...]
+  → "geo_agent selesai. Menunggu water_agent, fire_agent..."
+
+FASE 3 — VALIDATE (phase: "validate") — BARU
+  event: state | node_id:"manager" | state:THINKING | phase:"validate" | phase_step:"checking"
+  → "Memvalidasi data dari 4 agent..."
+
+  // Kalau ada anomali:
+  event: state | node_id:"manager" | state:THINKING | phase:"validate" | phase_step:"anomaly" | agent:"water_agent" | reason:"empty_data"
+  → "water_agent data kosong. Re-spawn..."
+  event: state | node_id:"manager" | state:THINKING | phase:"validate" | phase_step:"re-spawn-done" | agent:"water_agent" | status:"success"
+  → "Re-spawn water_agent sukses."
+
+  // Final validate:
+  event: state | node_id:"manager" | state:THINKING | phase:"validate" | phase_step:"valid"
+  → "Semua data valid. Lanjut synthesis."
+
+FASE 4 — SYNTHESIS (phase: "synthesis")
+  event: state | node_id:"manager" | state:THINKING | phase:"synthesis"
+  → narasi sintesis dari LLM
+  event: token | node_id:"manager" | content:"Berdasarkan data..."
+  event: token | node_id:"manager" | content:"dari 4 agent..."
+  → Token streaming ~30-100 token events selama synthesis
+
+FASE 5 — DONE (phase: "done")
+  event: state | node_id:"manager" | state:DONE | phase:"done" | type:"final_report"
+  → Full report text (markdown)
+
+2.6 SubAgent Event Sequence (per agent)
+
+  event: state | node_id:"water_agent" | node_type:"SubAgent" | state:THINKING
+  → LLM narrative: "Saya akan analisa kualitas air..."
+  // Bisa multiple THINKING events sebelum EXECUTING
+  event: state | node_id:"water_agent" | state:EXECUTING
+  → "Menjalankan tool: mock_data_generator..."
+  event: state | node_id:"mock_data_generator" | node_type:"Module" | state:EXECUTING
+  event: state | node_id:"mock_data_generator" | state:DONE
+  event: state | node_id:"water_agent" | state:DONE
+
+  Variasi:
+  - SubAgent bisa langsung DONE tanpa EXECUTING (kalau LLM jawab text-only)
+  - SubAgent bisa ERROR (timeout, LLM error, tool error)
+  - SubAgent bisa THINKING berkali-kali (LLM response multi-chunk)
+
+2.7 Node IDs yang muncul
+
+  Manager:   "manager"
+  SubAgents: "geo_agent", "water_agent", "fire_agent", "osint_agent", "scheduler_agent"
+  Modules:   "mock_data_generator", "system_scheduler"
+  System:    "worker_daemon" (untuk autonomous tasks, jarang)
+
+================================================================================
+3. FRONTEND ARCHITECTURE
+================================================================================
+
+3.1 File: frontend/src/app/dashboard/page.tsx (2203 lines)
+    Monolithic — semua komponen, store, dan logic dalam 1 file.
+
+3.2 Zustand Store (line 80-104)
+    interface TelemetryStore {
+      events: TelemetryEvent[]        // Max 200, oldest trimmed
+      tokens: Record<string, string>   // Accumulated LLM tokens per node_id
+      isConnected: boolean
+      isStreaming: boolean
+      activeTraceId: string | null
+      addEvent(e)   // append event, trim jika >200
+      addToken(nodeId, content)  // append token ke accumulator
+      clearTokens()
+      clearEvents()
+      setConnected(v)
+      setActiveTraceId(id)
+      setIsStreaming(v)
+    }
+
+    Cara kerja SSE → Store:
+    1. User kirim prompt via ChatInput
+    2. fetch(POST /api/stream, body: {prompt}) → ReadableStream reader
+    3. Parse SSE: event: state → addEvent(), event: token → addToken()
+    4. State berubah → komponen re-render
+
+3.3 Design Tokens (line 110-132)
+    Color palette (warm Anthropic style):
+      bg:        "#F5F4EF"     (warm parchment)
+      surface:   "#EDEBE5"
+      border:    "rgba(26,25,20,0.18)"
+      text:      "#1A1916"
+      textSec:   "#6B6760"
+      textMuted: "#9B9690"
+      accent:    "#D4956A"     (terracotta)
+      thinking:  "#D4956A"
+      executing: "#7A9A78"
+      error:     "#B07068"
+      complete:  "#80A888"
+
+    State → Color mapping:
+      IDLE      → textMuted
+      THINKING  → thinking (#D4956A)
+      SPAWNING  → spawning (#8A9598)
+      EXECUTING → executing (#7A9A78)
+      DONE      → complete (#80A888)
+      ERROR     → error (#B07068)
+
+3.4 Current Layout Structure (line ~1400-1640)
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ STATUS BAR (isConnected, isStreaming, eventCount)                    │
+├──────────┬────────────────────────────────┬─────────────────────────┤
+│ SIDEBAR  │ OBSERVATION ZONE (60%)         │ INTERACTION ZONE (40%)  │
+│          │                                │                         │
+│ sessions │ [ManagerCompoundCard]  ← NEW   │ TAB: Chat | Timeline    │
+│ list     │ [SubAgentGrid]         ← NEW   │                         │
+│          │ [DAGMiniMap]           ← NEW   │ ChatMessages /          │
+│          │ [ModuleOutput: report]         │ NarrativeCard list      │
+│          │                                │                         │
+│          │                                │ ChatInput               │
+└──────────┴────────────────────────────────┴─────────────────────────┘
+└─ FOOTER: "Tim Subak Guardian · 2026"
+
+3.5 Daftar Komponen (dalam page.tsx)
+
+  StatusBar          — bar tipis atas: model, worker status, event count
+  Sidebar            — session list + new audit button
+  ChatInput          — textarea + send, disabled saat streaming
+  ChatMessages       — bubble chat user/assistant
+  InteractionZone    — tabs: Chat | Timeline
+  NarrativeCard      — timeline event card (state-colored icon + narrative)
+
+  // Berikut adalah KOMPONEN BARU dari 4-fase pipeline:
+  ManagerCompoundCard — Kartu Manager dengan phase chain + THINKING + progress
+  SubAgentGrid        — Grid horizontal kartu sub-agent
+  SubAgentCard        — Kartu individual sub-agent
+  PhaseChain          — Indikator fase: Planning ●──○ Execute ●──○ ...
+  ProgressBar         — Step counter: ●───○───○───○ Step 4/12
+  DAGMiniMap          — Collapsible DAG viewer (existing DAGCanvas wrapper)
+
+  // Existing components (masih dipakai):
+  DAGCanvas           — SVG DAG layout (dagre)
+  DAGNode             — Node dalam DAG
+  NodeIcon            — Icon per node type (Manager/SubAgent/Module)
+  NodeDetailPanel     — Detail panel saat node di-klik (sekunder)
+  ModuleOutput        — Render markdown final report
+
+3.6 ManagerCompoundCard — Detail
+
+  Card persistent untuk Manager. Muncul begitu ada Manager event.
+
+  Struktur:
+  ┌──────────────────────────────────────────────────────────┐
+  │ [icon] MANAGER                          [Planning badge]  │
+  ├──────────────────────────────────────────────────────────┤
+  │ Planning ●──○ Execute ●──○ Validate ○──○ Synthesis       │ ← PhaseChain
+  │                                                          │
+  │ ┌─ THINKING narrative (latest only) ──────────────────┐  │ ← AnimatePresence
+  │ │ "Menganalisis permintaan user untuk audit Gianyar.." │  │   fade morph
+  │ └──────────────────────────────────────────────────────┘  │
+  │                                                          │
+  │ ●───○───○───○───○ Step 3/12                             │ ← ProgressBar
+  └──────────────────────────────────────────────────────────┘
+
+  Logic:
+  - extractPhases(events): filter event node_id="manager" + metadata.phase,
+    buat PhaseSegment[] untuk PhaseChain
+  - THINKING display: ambil latest event dengan node_id="manager" + state=THINKING
+  - AnimatePresence mode="wait": tiap THINKING baru → fade out lama, fade in baru
+  - PhaseChain: unique phases + current active phase with ● indicator
+  - Phase re-spawn: saat phase="validate" + phase_step="re-spawn" →
+    tambah segmen "Execute(agent_name)" di chain
+
+  PhaseSegment type:
+    { phase, label, step, narrative, metadata }
+
+3.7 SubAgentCard — Detail
+
+  Card untuk tiap sub-agent. Horizontal grid, muncul saat agent pertama kali
+  di-spawn, persist selamanya.
+
+  ┌──────────────────────┐
+  │ [icon] GEO_AGENT     │
+  │              [DONE]  │ ← state badge (color dari STATE_COLOR)
+  │                      │
+  │ ┌─ THINKING ──────┐  │ ← AnimatePresence, latest only
+  │ │ "Saya analisa.." │  │
+  │ └─────────────────┘  │
+  │                      │
+  │ ✓ complete           │ ← status footer (DONE/EXECUTING/ERROR)
+  └──────────────────────┘
+
+  Logic:
+  - Filter events.filter(e => e.node_id === agentId)
+  - Latest event → state badge color + label
+  - Latest THINKING event → narrative display
+  - AnimatePresence pada THINKING narrative
+  - Status footer: EXECUTING → shimmer bar, DONE → ✓, ERROR → ✕
+
+3.8 ProgressBar Logic
+
+  computed dari events:
+    total = count(events with node_type != "Module" && state != "IDLE")
+    current = count(manager phase events) + count(sub-agent DONE events)
+
+  Render: "●───○───○───○───○ Step 4/12"
+
+3.9 SubAgentGrid Logic
+
+  - Ambil semua unique node_id dari events dengan node_type="SubAgent"
+  - Render horizontal scrollable flex container
+  - Tiap agent_id → SubAgentCard
+  - Empty state: "Waiting for agents to spawn..."
+  - Card persist — tidak hilang meskipun agent sudah DONE
+
+3.10 Existing Komponen yang TETAP DIPAKAI
+
+  StatusBar          — unchanged
+  Sidebar            — unchanged
+  ChatInput          — unchanged
+  ChatMessages       — unchanged
+  InteractionZone    — unchanged (tabs Chat + Timeline)
+  NarrativeCard      — unchanged (timeline view)
+  ModuleOutput       — unchanged (final report markdown)
+  DAGCanvas/DAGNode  — via DAGMiniMap (collapsible)
+  NodeIcon           — unchanged (digunakan ManagerCompoundCard & SubAgentCard)
+
+================================================================================
+4. DATA FLOW PATTERNS (Yang perlu diketahui untuk redesign)
+
+4.1 Event Arrival Order
+
+  Manager Planning → Manager Execute Spawn →
+  [SubAgent-1 THINKING] [SubAgent-2 THINKING] [SubAgent-N THINKING] ...
+  [SubAgent-1 EXECUTING] [SubAgent-2 EXECUTING] ...
+  [Module-1 EXECUTING → DONE] ...
+  [SubAgent-1 DONE] [SubAgent-2 DONE] ...
+  Manager Execute Progress (per agent) →
+  Manager Validate → (optional re-spawn loop) →
+  Manager Synthesis (token stream) →
+  Manager DONE → final report
+
+  CATATAN: Sub-agents dijalankan paralel via asyncio.gather().
+  Frontend akan terima event interleaved (agent A THINKING, agent B THINKING,
+  agent A EXECUTING, agent B EXECUTING, agent A DONE, agent B DONE).
+
+4.2 Manager vs SubAgent events — Cara BEDAIN
+
+  Manager:  node_id === "manager"
+  SubAgent: node_type === "SubAgent" && node_id !== "manager"
+  Module:   node_type === "Module"
+
+4.3 Token Streaming
+
+  Hanya saat Fase 4 Synthesis:
+    event: token | node_id:"manager" | content:"chunk..."
+  
+  Frontend accumulator: store.tokens["manager"] = semua chunk digabung.
+  ChatMessages menampilkan tokens["manager"] sebagai streaming text.
+
+4.4 Chat Mode vs Audit Mode
+
+  Chat mode (greeting / simple question):
+    Manager THINKING → Manager DONE (metadata.type TIDAK "final_report")
+    → Tidak ada SPAWNING, tidak ada SubAgent
+
+  Audit mode (ada MasterPlan):
+    Full 4-fase pipeline seperti di atas
+    → Manager DONE dengan metadata.type === "final_report"
+
+4.5 Re-spawn Flow
+
+  Saat Validate deteksi anomali:
+    1. Manager emit THINKING phase:validate + phase_step:anomaly
+       → narrative: "water_agent error: data kosong. Re-spawn..."
+    2. Backend re-spawn SubAgent water_agent
+       → SubAgent events: THINKING → EXECUTING → DONE (seperti biasa)
+    3. Manager emit THINKING phase:validate + phase_step:re-spawn-done
+       → narrative: "Re-spawn water_agent sukses."
+
+  Frontend: PhaseChain tambah segmen "Execute(water)" di samping Validate.
+
+================================================================================
+5. IMPLEMENTATION NOTES (Untuk Claude)
+
+5.1 File yang Boleh Diubah
+    HANYA: frontend/src/app/dashboard/page.tsx
+    JANGAN sentuh file backend apapun.
+
+5.2 Dependencies yang tersedia
+    npm list (relevan):
+      next 15
+      react 19
+      zustand (sudah ada)
+      dagre + @types/dagre (sudah ada)
+      react-markdown (sudah ada)
+      framer-motion (sudah ada)
+
+5.3 Style Approach
+    Saat ini semua pakai inline styles (React.CSSProperties).
+    Tidak pakai Tailwind classes di komponen utama.
+    Tidak pakai CSS modules.
+    Global styles di globals.css.
+    Design tokens didefinisikan sebagai const C di page.tsx.
+
+    BISA ganti ke Tailwind kalau lebih enak — globals.css sudah punya
+    PEMALI tokens. Tapi harus konsisten.
+
+5.4 State Management
+    Zustand store: useTelemetryStore()
+    Events: array, max 200, oldest trimmed.
+    Semua komponen membaca langsung dari store via useTelemetryStore().
+
+    Untuk komputasi berat (grouping, filtering), pakai useMemo().
+
+5.5 Framer Motion
+    Sudah dipakai di ManagerCompoundCard & SubAgentCard untuk AnimatePresence.
+    Pattern:
+      <AnimatePresence mode="wait">
+        <motion.p
+          key={narrative}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.4, ease: [0.0, 0.0, 0.2, 1] }}
+        >
+          {narrative}
+        </motion.p>
+      </AnimatePresence>
+
+5.6 Build Command
+    cd frontend && npm run build
+    Harus success — no TypeScript errors.
+
+5.7 Known Issues (JANGAN diulangi)
+    - TypeScript strict: metadata bertipe Record<string, unknown> | null,
+      akses properti harus pakai type guard atau optional chaining
+    - Duplicate property: jangan tulis { ...spread, prop: val, prop: val }
+    - SSE parsing: nama event dibaca dari "event:" line, bukan JSON field
+    - Tokens accumulator: Record<string, string> per node_id
+
+================================================================================
+6. DESIGN DIRECTION (Dari AGENTS.md & diskusi)
+
+6.1 Aesthetic
+    - Dark theme: background #0A0A0B, surface #111113, text #F4F4F5
+      (saat ini masih warm cream Anthropic style — BISA diganti ke dark)
+    - Typography: Geist / DM Mono, bukan Inter/Roboto
+    - Feel: Terminal + Control Room, bukan SaaS template
+    - No purple gradient on white, no centered hero, no card shadows tebal
+
+6.2 Layout
+    - 60/40 split: Observation Zone (kiri) / Interaction Zone (kanan)
+    - Tidak ada topbar navigasi klasik — hanya slim status bar
+    - Observation Zone: Manager Card + SubAgent Grid + DAG MiniMap + Report
+    - Interaction Zone: Chat + Timeline tabs + Input
+
+6.3 Card Design (Final Confirmed)
+    - 1 card persistent per agent
+    - Manager card: phase chain horizontal, latest THINKING fade-morph
+    - Sub-agent cards: grid horizontal persist di bawah Manager
+    - Card height: fluid (adjust to content)
+    - Progress: bottom-left, ●──○──○──○ style
+    - Re-spawn: segmen baru di phase chain (bukan re-entry)
+
+6.4 Yang BELUM optimal di current frontend:
+    - 2203 baris monolithic file — bisa di-split
+    - Inline styles everywhere — susah maintain
+    - DAG Canvas masih dominan — harusnya mini-map
+    - Timeline di Interaction Zone redundant dengan Manager+SubAgent cards
+    - Final report bisa lebih highlighted
+    - Tidak ada skeleton/loading state
+    - Tidak ada empty state yang bagus
+
+================================================================================
+7. PROGRESSIVE STEPS COUNTER — DETAIL
+
+  Total steps = manager phase events + sub-agent events (non-Module, non-IDLE)
+  Tiap kali ada event baru → progress bar update.
+
+  Implementation di frontend:
+    const agentEvents = events.filter(e => e.node_type !== "Module" && e.state !== "IDLE")
+    const managerPhases = events.filter(e => e.node_id === "manager" && e.metadata?.phase).length
+    const subDone = agentEvents.filter(e => e.state === "DONE" && e.node_id !== "manager").length
+    const total = managerPhases + subDone  // atau custom logic
+    const current = Math.min(managerPhases, total)
+
+================================================================================
+8. SSE PARSING — Kode Persis (JANGAN diubah)
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      let eventType = "";
+      let dataLine = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLine = line.slice(5).trim();
+        } else if (line === "" && dataLine) {
+          const parsed = JSON.parse(dataLine);
+          if (eventType === "state") addEvent(parsed);
+          else if (eventType === "token") addToken(parsed.node_id, parsed.content);
+          eventType = ""; dataLine = "";
+        }
+      }
+    }
+
+================================================================================
+9. BACKEND ENDPOINT REFERENCE
+
+    POST /api/stream       → trigger audit, return SSE stream
+      Body: { "prompt": "Audit lingkungan Gianyar..." }
+      Response: text/event-stream
+
+    GET  /api/telemetry     → subscribe semua telemetry events
+      (Tidak dipakai frontend saat ini — langsung POST /api/stream)
+
+    GET  /api/tasks         → list autonomous tasks
+
+    CORS: allow origin *
+
+================================================================================
+10. CURRENT FILE STRUCTURE (Frontend)
+
+frontend/
+├── src/
+│   └── app/
+│       └── dashboard/
+│           └── page.tsx        ← MAIN FILE (2203 lines)
+├── components/                 ← (kosong — semua inline di page.tsx)
+├── stores/                     ← (kosong — store inline di page.tsx)
+├── styles/
+│   └── globals.css             ← CSS variables (PEMALI tokens)
+├── package.json
+├── next.config.js
+└── .env.local                  ← NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+
+backend/
+├── core/
+│   ├── orchestrator.py         ← Manager + 4-fase pipeline
+│   ├── models.py               ← TelemetryEvent, NodeState, dll
+│   ├── telemetry.py            ← SSE emitter
+│   ├── registry.py             ← Tool auto-discovery
+│   ├── llm_client.py           ← OpenRouter client singleton
+│   └── memory.py               ← ChromaDB + PostgreSQL knowledge graph
+├── modules/
+│   ├── mock_module.py          ← mock_data_generator tool
+│   └── scheduler_mod.py        ← system_scheduler tool
+├── main.py                     ← FastAPI app
+└── worker.py                   ← Background daemon (autonomous tasks)
+
+================================================================================
+END OF SPEC
+================================================================================

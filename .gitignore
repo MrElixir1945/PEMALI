@@ -32,5 +32,8 @@ data/
 chroma_db/
 scratch/
 logs/
+backups/
+backend/logs/sessions/
+(app)/
 .opencode/
 graphify-out/

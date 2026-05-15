@@ -1,19 +1,22 @@
 import type { Metadata } from "next";
-import { Inter, Source_Serif_4, JetBrains_Mono } from "next/font/google";
+import { Lora, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
+const lora = Lora({
+  variable: "--font-lora",
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  style: ["normal", "italic"],
+  display: "swap",
+});
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
-const sourceSerif = Source_Serif_4({
-  variable: "--font-source-serif",
-  subsets: ["latin"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-mono",
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
   subsets: ["latin"],
 });
 
@@ -29,7 +32,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${sourceSerif.variable} ${jetbrainsMono.variable} antialiased bg-[#FAF9F6] text-[#1C1917] min-h-screen flex flex-col font-sans`}>
+      <body className={`${lora.variable} ${geistSans.variable} ${geistMono.variable} antialiased bg-[var(--pemali-bg)] text-[var(--pemali-text-primary)] min-h-screen flex flex-col font-sans`}>
         {children}
       </body>
     </html>

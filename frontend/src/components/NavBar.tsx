@@ -16,7 +16,7 @@ export default function NavBar() {
   return (
     <nav className="flex items-center justify-between px-8 py-6 max-w-7xl mx-auto w-full">
       <div className="flex items-center">
-        <Link href="/" className="font-serif text-2xl font-semibold tracking-tight text-[#1C1917]">
+        <Link href="/" className="font-serif text-2xl font-semibold tracking-tight" style={{ color: "var(--pemali-text-primary)" }}>
           Pemali.
         </Link>
       </div>
@@ -26,14 +26,18 @@ export default function NavBar() {
             key={link.name}
             href={link.href}
             className={`text-sm transition-colors relative py-1 ${
-              pathname === link.href ? "text-stone-900 font-medium" : "text-stone-500 hover:text-stone-900"
+              pathname === link.href ? "font-medium" : ""
             }`}
+            style={{
+              color: pathname === link.href ? "var(--pemali-text-primary)" : "var(--pemali-text-muted)",
+            }}
           >
             {link.name}
             {pathname === link.href && (
               <motion.div
                 layoutId="nav-indicator"
-                className="absolute bottom-0 left-0 w-full h-[1px] bg-stone-900"
+                className="absolute bottom-0 left-0 w-full h-[1px]"
+                style={{ backgroundColor: "var(--pemali-text-primary)" }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
               />
             )}
@@ -43,7 +47,11 @@ export default function NavBar() {
       <div>
         <Link
           href="/dashboard"
-          className="bg-stone-900 text-[#FAF9F6] px-6 py-2.5 rounded-full text-sm font-medium hover:bg-stone-800 transition-all shadow-sm inline-block"
+          className="px-6 py-2.5 rounded-full text-sm font-medium transition-all inline-block"
+          style={{
+            backgroundColor: "var(--pemali-text-primary)",
+            color: "var(--pemali-bg)",
+          }}
         >
           Enter Dashboard
         </Link>

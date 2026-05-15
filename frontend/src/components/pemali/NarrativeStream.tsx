@@ -9,20 +9,27 @@ export default function NarrativeStream() {
 
   useEffect(() => {
     const connect = () => {
+      console.log("[SSE] Connecting to /api/telemetry...");
       const es = new EventSource("/api/telemetry");
 
-      es.onopen = () => setConnected(true);
+      es.onopen = () => {
+        console.log("[SSE] Connection opened");
+        setConnected(true);
+      };
 
       es.onmessage = (e) => {
+        console.log("[SSE] Message received:", e.data);
         try {
           const event = JSON.parse(e.data);
+          console.log("[SSE] Parsed event:", event);
           addEvent(event);
         } catch (err) {
-          console.error("SSE parse error:", err);
+          console.error("[SSE] Parse error:", err, "Raw data:", e.data);
         }
       };
 
       es.onerror = () => {
+        console.error("[SSE] Connection error");
         setConnected(false);
         es.close();
         setTimeout(connect, 3000);
@@ -34,7 +41,10 @@ export default function NarrativeStream() {
     connect();
 
     return () => {
-      if (esRef.current) esRef.current.close();
+      if (esRef.current) {
+        console.log("[SSE] Closing connection");
+        esRef.current.close();
+      }
     };
   }, [addEvent, setConnected]);
 

@@ -3,93 +3,159 @@
 
 @plugin "@tailwindcss/typography";
 
+/* Direction: Warm Editorial Serif — Anthropic.com */
 :root {
-  --background: #FAF9F6;
-  --foreground: #1C1917;
+  --pemali-bg: #F5F4EF;
+  --pemali-surface: #EDEBE5;
+  --pemali-border: rgba(26, 25, 20, 0.18);
+  --pemali-border-glow: rgba(212, 149, 106, 0.06);
+
+  --pemali-text-primary: #1A1916;
+  --pemali-text-secondary: #6B6760;
+  --pemali-text-muted: #9B9690;
+
+  --state-thinking: #D4956A;
+  --state-spawning: #8A9598;
+  --state-executing: #7A9A78;
+  --state-error: #B07068;
+  --state-complete: #80A888;
+
+  --pemali-accent: #D4956A;
+  --pemali-accent-dim: rgba(212, 149, 106, 0.08);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-source-serif), ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
-  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --color-background: var(--pemali-bg);
+  --color-foreground: var(--pemali-text-primary);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--pemali-bg);
+  color: var(--pemali-text-primary);
 }
 
-.poleng-divider {
-  height: 3px;
-  width: 100%;
-  background: repeating-linear-gradient(
-    90deg,
-    #1C1917,
-    #1C1917 10px,
-    #E5E5E5 10px,
-    #E5E5E5 20px
-  );
-  opacity: 0.15;
+.dag-grid {
+  background-image: radial-gradient(circle, rgba(26,25,20,0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
-/* Typography styles for Prose */
-.prose {
-  color: #44403c;
-  line-height: 1.75;
-}
-
-.prose h1, .prose h2, .prose h3, .prose h4 {
-  font-family: var(--font-serif);
-  color: #1c1917;
-  margin-top: 2em;
-  margin-bottom: 1em;
-}
-
-.prose table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 2em 0;
-  font-size: 0.9em;
-}
-
-.prose th {
-  background: #f5f5f4;
-  padding: 12px;
-  text-align: left;
-  border-bottom: 2px solid #e7e5e4;
-}
-
-.prose td {
-  padding: 12px;
-  border-bottom: 1px solid #f5f5f4;
-}
-
-.prose blockquote {
-  border-left: 4px solid #d6d3d1;
-  padding-left: 1.5em;
-  font-style: italic;
-  color: #78716c;
-}
-
-.prose ul, .prose ol {
-  padding-left: 1.5em;
-  margin-bottom: 1.5em;
-}
-
-.prose li {
-  margin-bottom: 0.5em;
-}
-
-/* Custom Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #D6D3CD; border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: #A8A29E; }
-
+::-webkit-scrollbar-thumb { background: #D5D3CE; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #B5B3AE; }
 
 @keyframes pulse {
   0% { transform: scale(1); opacity: 1; }
   100% { transform: scale(3); opacity: 0; }
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.animate-fadeSlideIn {
+  animation: fadeSlideIn 0.3s ease both;
+}
+
+.animate-blink-cursor {
+  animation: blink 1s infinite;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Soft grain overlay — Anthropic atmosphere */
+.noise-overlay::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+}
+
+/* Global separator — reusable hairline */
+.separator {
+  height: 1px;
+  background: var(--pemali-border);
+  border: none;
+  margin: 0;
+}
+
+.pemali-report h1,
+.pemali-report h2,
+.pemali-report h3 {
+  font-size: 12px;
+  font-weight: 500;
+  margin: 10px 0 4px;
+  color: var(--pemali-text-primary);
+  letter-spacing: 0.03em;
+  font-family: var(--font-geist-mono), monospace;
+}
+.pemali-report p { margin: 0 0 6px; }
+.pemali-report ul, .pemali-report ol {
+  padding-left: 16px;
+  margin: 4px 0;
+}
+.pemali-report li { margin-bottom: 2px; }
+.pemali-report code {
+  background: var(--pemali-surface);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: var(--font-geist-mono), monospace;
+}
+.pemali-report strong { font-weight: 500; }
+
+/* Dashboard responsive */
+@media (max-width: 768px) {
+  .dashboard-grid {
+    flex-direction: column !important;
+  }
+  .observation-zone {
+    flex: 1 1 auto !important;
+    border-right: none !important;
+    border-bottom: 0.5px solid var(--pemali-border);
+  }
+  .interaction-zone {
+    flex: 1 1 auto !important;
+    min-height: 40vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

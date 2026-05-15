@@ -70,17 +70,18 @@ export default function MethodologyPage() {
             </div>
           </div>
 
-          <div className="bg-stone-900 rounded-[2.5rem] p-10 mb-20 text-white shadow-xl shadow-stone-200">
-            <button 
+          <div className="rounded-[2.5rem] p-10 mb-20 border" style={{ backgroundColor: "var(--pemali-surface)", borderColor: "var(--pemali-border)", color: "var(--pemali-text-primary)" }}>
+            <button
               onClick={() => setShowTechnical(!showTechnical)}
-              className="w-full flex items-center justify-between text-white/50 hover:text-white transition-colors"
+              className="w-full flex items-center justify-between transition-colors"
+              style={{ color: "var(--pemali-text-muted)" }}
             >
               <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Technical Deep Dive</span>
-              <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-white/20">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: "var(--pemali-bg)" }}>
                 {showTechnical ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </div>
             </button>
-            
+
             <AnimatePresence>
               {showTechnical && (
                 <motion.div
@@ -89,7 +90,7 @@ export default function MethodologyPage() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="pt-8 text-sm text-stone-300 leading-relaxed border-t border-white/10 mt-6 font-light">
+                  <div className="pt-8 text-sm leading-relaxed border-t mt-6 font-light" style={{ borderColor: "var(--pemali-border)", color: "var(--pemali-text-secondary)" }}>
                     Sistem berbasis <strong>ReAct (Reasoning & Acting)</strong>. Setiap audit melalui fase observasi spasial menggunakan integrasi citra satelit <strong>Sentinel-2</strong> untuk mendapatkan data <strong>NDVI</strong> (indeks kesehatan vegetasi) terkini. AI memvalidasi hipotesis kerusakan lingkungan berdasarkan observasi tersebut sebelum melakukan eksekusi manifest modul melalui Unified Tool Interface.
                   </div>
                 </motion.div>

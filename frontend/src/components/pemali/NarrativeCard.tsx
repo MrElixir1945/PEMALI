@@ -5,11 +5,11 @@ import { Cpu, Bot, Wrench, Clock } from "lucide-react";
 import type { TelemetryEvent } from "@/stores/telemetryStore";
 
 const stateConfig: Record<string, { color: string; bg: string }> = {
-  THINKING: { color: "var(--state-thinking)", bg: "rgba(139,92,246,0.12)" },
-  SPAWNING: { color: "var(--state-spawning)", bg: "rgba(59,130,246,0.12)" },
-  EXECUTING: { color: "var(--state-executing)", bg: "rgba(16,185,129,0.12)" },
-  ERROR: { color: "var(--state-error)", bg: "rgba(239,68,68,0.12)" },
-  DONE: { color: "var(--state-complete)", bg: "rgba(110,231,183,0.12)" },
+  THINKING: { color: "var(--state-thinking)", bg: "rgba(204,120,92,0.08)" },
+  SPAWNING: { color: "var(--state-spawning)", bg: "rgba(138,149,152,0.08)" },
+  EXECUTING: { color: "var(--state-executing)", bg: "rgba(122,154,120,0.08)" },
+  ERROR: { color: "var(--state-error)", bg: "rgba(176,112,104,0.08)" },
+  DONE: { color: "var(--state-complete)", bg: "rgba(128,168,136,0.08)" },
 };
 
 const nodeTypeIcon: Record<string, React.ElementType> = {

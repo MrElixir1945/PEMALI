@@ -1,13 +1,14 @@
 import logging
 import asyncio
 import os
+import traceback
 import datetime
 import json
 import uuid
 import re
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
@@ -24,9 +25,10 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 # Configure Logging
 logging.basicConfig(
-    level=logging.INFO, 
+    level=logging.DEBUG, 
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger("PEMALI")
 
 app = FastAPI(title="PEMALI V2", version="2.6.0")
 
@@ -75,13 +77,22 @@ class TriggerRequest(BaseModel):
 # --- Background Wrapper ---
 async def execute_agent_safely(prompt: str, session_id: str):
     """Bungkus eksekusi dengan antrean semaphore untuk mencegah resource spike."""
+    print(f"!!! execute_agent_safely CALLED: session={session_id}")
+    logger.critical(f"[EXEC] >>>>> execute_agent_safely STARTED: session={session_id} <<<<<")
+    logger.info(f"[EXEC] Starting agent execution: session={session_id}, prompt={prompt[:100]}...")
     async with agent_semaphore:
-        logging.info(f"[Orchestrator] Starting session {session_id} with prompt: {prompt[:50]}...")
-        orchestrator = PemaliOrchestrator(session_id)
+        logger.critical(f"[EXEC] Semaphore acquired for session {session_id}")
+        logger.info(f"[EXEC] Creating Orchestrator...")
         try:
-            await orchestrator.run(prompt)
+            orchestrator = PemaliOrchestrator(session_id)
+            logger.info(f"[EXEC] Orchestrator created, calling run()...")
+            result = await orchestrator.run(prompt)
+            logger.info(f"[EXEC] Agent execution completed for session {session_id}")
+            logger.debug(f"[EXEC] Result preview: {result[:200] if isinstance(result, str) else str(result)[:200]}...")
         except Exception as e:
-            logging.error(f"[Orchestrator] Fatal Error in session {session_id}: {str(e)}")
+            logger.critical(f"[EXEC] <<<<< FATAL ERROR: {e} >>>>>")
+            logger.critical(f"[EXEC] TRACEBACK:\n{traceback.format_exc()}")
+            logger.error(f"[EXEC] Fatal Error in session {session_id}: {str(e)}", exc_info=True)
             await telemetry.emit(TelemetryEvent(
                 trace_id=session_id,
                 node_id="system",
@@ -95,6 +106,7 @@ async def execute_agent_safely(prompt: str, session_id: str):
 @app.get("/")
 async def root():
     """Health check & Engine identity."""
+    logger.info("[/] Health check requested")
     return {
         "status": "online",
         "service": "PEMALI Super Agent (Hierarchical DAG)",
@@ -109,13 +121,47 @@ async def get_available_tools():
     """Discovery endpoint untuk registrasi tools ke LLM."""
     return registry.get_all_manifests()
 
+@app.post("/api/stream")
+async def trigger_stream(req: TriggerRequest):
+    """
+    POST SSE — real-time streaming audit.
+    Mirip Sismind: generator yield langsung ke StreamingResponse tanpa queue.
+    """
+    session_id = req.session_id or f"sess-{uuid.uuid4().hex[:16]}"
+    logger.info(f"[/api/stream] Streaming audit: session={session_id}")
+
+    async def event_generator():
+        yield f"event: state\ndata: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
+        try:
+            async with agent_semaphore:
+                orchestrator = PemaliOrchestrator(session_id)
+                async for line in orchestrator.run_streaming(req.prompt):
+                    yield line
+        except Exception as e:
+            logger.error(f"[/api/stream] Error: {e}", exc_info=True)
+            yield f"event: state\ndata: {json.dumps({'state': 'ERROR', 'narrative': f'Fatal: {str(e)}', 'node_id': 'system'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Type": "text/event-stream",
+        }
+    )
+
 @app.post("/api/trigger")
 async def trigger_agent(req: TriggerRequest, background_tasks: BackgroundTasks):
     """Memulai siklus audit (Manual Trigger) dengan antrean background."""
     session_id = req.session_id or f"sess-{uuid.uuid4().hex[:16]}"
+    logger.info(f"[/api/trigger] Received trigger: session={session_id}, prompt_length={len(req.prompt)}")
+    logger.debug(f"[/api/trigger] Prompt: {req.prompt[:200]}...")
     
     # Eksekusi dilempar ke background agar endpoint langsung me-return 200 OK
     background_tasks.add_task(execute_agent_safely, req.prompt, session_id)
+    logger.info(f"[/api/trigger] Task queued for session {session_id}")
     
     return {
         "status": "queued",
@@ -130,16 +176,24 @@ async def sse_telemetry(request: Request):
     Endpoint SSE (Server-Sent Events) untuk Dashboard.
     Menyalurkan kognisi AI (thinking, spawning, executing) secara asinkron.
     """
-    return StreamingResponse(
-        telemetry.subscribe(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Content-Type": "text/event-stream"
-        }
-    )
+    client_id = request.client.host if request.client else "unknown"
+    logging.info(f"[SSE] Client connected: {client_id}")
+    try:
+        return StreamingResponse(
+            telemetry.subscribe(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "Content-Type": "text/event-stream"
+            }
+        )
+    except Exception as e:
+        logging.error(f"[SSE] Endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        logging.info(f"[SSE] Client disconnected: {client_id}")
 
 @app.get("/api/history/{session_id}")
 @app.get("/api/session/{session_id}")
@@ -163,15 +217,19 @@ def get_history(session_id: str, db: Session = Depends(get_db)):
 @app.get("/api/status")
 async def get_system_status(db: Session = Depends(get_db)):
     """Agregasi data untuk Overview Dashboard."""
+    logger.debug("[/api/status] Status check requested")
     try:
         recent_tasks = db.query(AutonomousTask).order_by(AutonomousTask.id.desc()).limit(5).all()
-        return {
+        result = {
             "fastapi_active": True,
             "modules_loaded": len(registry.tools),
             "concurrent_tasks_active": MAX_CONCURRENT_TASKS - agent_semaphore._value,
             "recent_tasks": [{"id": t.id, "status": t.status} for t in recent_tasks]
         }
+        logger.debug(f"[/api/status] Returning: modules={len(registry.tools)}, tasks={len(recent_tasks)}")
+        return result
     except Exception as e:
+        logger.error(f"[/api/status] Error: {e}")
         return {"error": str(e), "fastapi_active": True}
 
 if __name__ == "__main__":
