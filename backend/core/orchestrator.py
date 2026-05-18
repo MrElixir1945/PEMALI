@@ -1,6 +1,7 @@
 import json
 import asyncio
 import os
+import re
 import datetime
 import time
 import uuid
@@ -8,7 +9,8 @@ import logging
 import contextvars
 from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI, APIError, APIConnectionError, APIStatusError
-from backend.core.memory import query_semantic, query_memory_graph_for_context, store_semantic_memory, insert_memory_graph
+from backend.core.memory import query_semantic, query_memory_graph_for_context, store_semantic_memory, insert_memory_graph, query_semantic_scoped
+from backend.core.database import SessionLocal, AuditLog, RawSensorData
 from backend.core.memory_processor import TemporalPatternExtractor, KnowledgeGraphBuilder
 from backend.core.models import MasterPlan, TaskIntent, TelemetryEvent, NodeState, ErrorResponse
 from backend.core.telemetry import telemetry
@@ -63,8 +65,8 @@ PLAN_TOOL = {
 }
 
 SCOPE_MAP = {
-    "geo_agent": ["geo_*", "satellite_*", "mapping_*"],
-    "water_agent": ["water_*", "hydrology_*"],
+    "geo_agent": ["geo_*", "satellite_*", "mapping_*", "air_quality_*", "earthquake_*", "weather_*", "climate_*"],
+    "water_agent": ["water_*", "hydrology_*", "sea_*", "marine_*"],
     "fire_agent": ["fire_*", "thermal_*"],
     "osint_agent": ["osint_*", "news_*", "scrape_*"],
 }
@@ -461,10 +463,20 @@ class SubAgent:
             duration_ms = round((time.monotonic() - start_time) * 1000, 2)
             logger.debug(f"[Module] {name} completed in {duration_ms}ms, status={output.status}")
 
+            raw_payload = {}
+            if output.data:
+                raw_payload = output.data
+                if isinstance(raw_payload, dict) and len(str(raw_payload)) > 50000:
+                    raw_payload = {"_truncated": True, "size": len(str(output.data))}
+
             await telemetry.emit(TelemetryEvent(
                 trace_id=self.trace_id, node_id=name, node_type="Module",
                 state=NodeState.DONE, narrative=f"Modul [{name}] selesai.",
-                metadata={"tool_name": name, "duration_ms": duration_ms, "status": output.status}
+                metadata={
+                    "tool_name": name, "duration_ms": duration_ms, "status": output.status,
+                    "raw_payload": raw_payload,
+                    "agent_hint": output.agent_hint,
+                }
             ))
 
             return {"tool_call_id": tool_call_id, "tool_name": name, "output": output.model_dump()}
@@ -485,6 +497,20 @@ class PemaliOrchestrator:
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.headers = {"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"}
+        self.mode = "human"
+        self.source = "user"
+        self.priority = 5
+        self.case_title = None  # S5: title untuk autonomous reports
+        self.strategic_context = ""
+        self._started_at = time.time()
+
+    def set_autonomous_mode(self, memory_context: str = "", source: str = "autonomous", priority: int = 5, case_title: str = None, strategic_context: str = ""):
+        self.mode = "autonomous"
+        self.memory_context = memory_context
+        self.source = source
+        self.priority = priority
+        self.case_title = case_title or self.case_title
+        self.strategic_context = strategic_context
 
     def _is_error_response(self, res: Dict) -> bool:
         return isinstance(res, dict) and res.get("status") in [
@@ -493,7 +519,7 @@ class PemaliOrchestrator:
 
     async def _phase_validate(self, shared_context: Dict, failed_tasks: Dict, 
                               plan: "MasterPlan", trace_id: str) -> tuple:
-        """Fase 3: Validasi hasil agent, trigger re-spawn jika anomali.
+        """Fase 3: Validasi hasil agent, trigger re-spawn jika ditemukan ketidaksesuaian data.
         
         Returns: (shared_context, failed_tasks, re_spawn_log, validate_summary)
         """
@@ -524,7 +550,7 @@ class PemaliOrchestrator:
             re_spawned_ok = False
             for attempt in range(1, max_re_spawn + 1):
                 reason_text = "error" if reason == "error" else "data kosong"
-                sp_narrative = f"Anomali di {agent}: {reason_text}. Re-spawn attempt {attempt}/{max_re_spawn}."
+                sp_narrative = f"Perlu verifikasi ulang di {agent}: {reason_text}. Percobaan ke-{attempt}/{max_re_spawn}."
                 await telemetry.emit(TelemetryEvent(
                     trace_id=trace_id, node_id="manager", node_type="Manager",
                     state=NodeState.THINKING, narrative=sp_narrative,
@@ -577,12 +603,12 @@ class PemaliOrchestrator:
         success_count = len(shared_context) - len(failed_tasks)
         if anomalies:
             validate_summary = (
-                f"Validasi: {success_count}/{len(shared_context)} agent sukses."
-                f" {len(anomalies)} anomali terdeteksi, "
-                f"{len([r for r in re_spawn_log if r['status'] == 'success'])} berhasil di-re-spawn."
+                f"Validasi: {success_count}/{len(shared_context)} agent berhasil."
+                f" {len(anomalies)} memerlukan verifikasi ulang, "
+                f"{len([r for r in re_spawn_log if r['status'] == 'success'])} tervalidasi."
             )
         else:
-            validate_summary = f"Semua {success_count} agent valid tanpa anomali."
+            validate_summary = f"Semua {success_count} agent valid dan data lengkap."
 
         await telemetry.emit(TelemetryEvent(
             trace_id=trace_id, node_id="manager", node_type="Manager",
@@ -668,33 +694,65 @@ class PemaliOrchestrator:
         all_manifests = registry.get_all_manifests()
         tool_context = build_tool_context(all_manifests)
 
-        sys_prompt = (
-            "[PEMALI NARRATIVE CONTRACT v1]\n"
-            "Anda adalah MANAGER AGENT dalam sistem audit lingkungan Bali.\n"
-            "Tugas Anda: analisis permintaan user, dekomposisi menjadi sub-tugas terstruktur, delegasikan ke Sub-Agent yang sesuai, lalu sintesis hasilnya.\n\n"
+        if self.mode == "autonomous":
+            mem_part = f"\n# MEMORY KONTEKS\n{self.memory_context}\n" if self.memory_context else ""
+            strat_part = f"\n# KONTEKS STRATEGIS (Agent Otak)\n{self.strategic_context}\n" if self.strategic_context else ""
+            sys_prompt = (
+                "[PEMALI AUTONOMOUS AGENT RUN]\n"
+                "Anda adalah AGENT RUN dalam sistem audit lingkungan Bali.\n"
+                "Anda menjalankan SATU kasus audit yang sudah ditentukan oleh Agent Otak.\n"
+                f"Priority: {self.priority}/10\n"
+                f"{strat_part}\n"
 
-            f"{tool_context}\n\n"
+                f"{tool_context}\n\n"
 
-            "# GATE LOGIC (evaluasi dulu sebelum bertindak)\n"
-            "Apakah ini PERMINTAAN AUDIT LINGKUNGAN atau SEKADAR PERCAKAPAN BIASA?\n"
-            "- Jika hanya salam, sapaan, tanya kabar, atau obrolan ringan → JAWAB LANGSUNG tanpa tool.\n"
-            "- Jika user meminta data, investigasi, audit kawasan, analisis lingkungan, atau informasi spesifik Bali → gunakan tool create_audit_plan.\n"
-            "Jangan spawn SubAgent untuk percakapan ringan — itu buang sumber daya.\n\n"
+                "# TUGAS ANDA\n"
+                "1. Analisis kasus yang diberikan — apa yang perlu diaudit?\n"
+                "2. Buat rencana audit menggunakan tool create_audit_plan\n"
+                "3. Jalankan Sub-Agent sesuai rencana\n"
+                "4. Validasi hasil\n"
+                "5. Buat laporan sintesis yang komprehensif\n\n"
 
-            "# ATURAN NARASI\n"
-            "SEBELUM membuat plan, narasikan dulu dalam bahasa Indonesia:\n"
-            "- Area audit apa yang kamu identifikasi dari permintaan user\n"
-            "- Mengapa area tersebut prioritas untuk diaudit\n"
-            "- Agent mana yang paling cocok dan mengapa\n"
-            "Narasi akan ditampilkan ke user — ceritakan proses berpikirmu.\n\n"
+                "# ATURAN NARASI\n"
+                "Narasikan dulu dalam bahasa Indonesia sebelum membuat plan:\n"
+                "- Apa yang kamu pahami dari kasus ini\n"
+                "- Kenapa ini penting untuk lingkungan Bali\n"
+                "- Agent mana yang cocok dan kenapa\n\n"
 
-            "# FORMAT OUTPUT\n"
-            "Setelah narasi, gunakan tool create_audit_plan untuk output rencana terstruktur.\n"
-            "Agent yang tersedia: geo_agent, water_agent, fire_agent, osint_agent, scheduler_agent\n"
-            "depends_on untuk urutan DAG — task tanpa dependency dikerjakan paralel.\n"
-            "PENTING: hanya assign task yang sesuai dengan tools yang tersedia di atas."
-            f"{rag_part}{graph_part}"
-        )
+                "Agent yang tersedia: geo_agent, water_agent, fire_agent, osint_agent, scheduler_agent\n"
+                f"{mem_part}"
+                f"{rag_part}{graph_part}"
+            )
+            plan_user_prompt = f"Kasus yang harus diaudit:\n{prompt}"
+        else:
+            sys_prompt = (
+                "[PEMALI NARRATIVE CONTRACT v1]\n"
+                "Anda adalah MANAGER AGENT dalam sistem audit lingkungan Bali.\n"
+                "Tugas Anda: analisis permintaan user, dekomposisi menjadi sub-tugas terstruktur, delegasikan ke Sub-Agent yang sesuai, lalu sintesis hasilnya.\n\n"
+
+                f"{tool_context}\n\n"
+
+                "# GATE LOGIC (evaluasi dulu sebelum bertindak)\n"
+                "Apakah ini PERMINTAAN AUDIT LINGKUNGAN atau SEKADAR PERCAKAPAN BIASA?\n"
+                "- Jika hanya salam, sapaan, tanya kabar, atau obrolan ringan → JAWAB LANGSUNG tanpa tool.\n"
+                "- Jika user meminta data, investigasi, audit kawasan, analisis lingkungan, atau informasi spesifik Bali → gunakan tool create_audit_plan.\n"
+                "Jangan spawn SubAgent untuk percakapan ringan — itu buang sumber daya.\n\n"
+
+                "# ATURAN NARASI\n"
+                "SEBELUM membuat plan, narasikan dulu dalam bahasa Indonesia:\n"
+                "- Area audit apa yang kamu identifikasi dari permintaan user\n"
+                "- Mengapa area tersebut prioritas untuk diaudit\n"
+                "- Agent mana yang paling cocok dan mengapa\n"
+                "Narasi akan ditampilkan ke user — ceritakan proses berpikirmu.\n\n"
+
+                "# FORMAT OUTPUT\n"
+                "Setelah narasi, gunakan tool create_audit_plan untuk output rencana terstruktur.\n"
+                "Agent yang tersedia: geo_agent, water_agent, fire_agent, osint_agent, scheduler_agent\n"
+                "depends_on untuk urutan DAG — task tanpa dependency dikerjakan paralel.\n"
+                "PENTING: hanya assign task yang sesuai dengan tools yang tersedia di atas."
+                f"{rag_part}{graph_part}"
+            )
+            plan_user_prompt = prompt
 
         stream_queue = stream_queue_var.get()
         # Retry up to 2x untuk plan generation
@@ -710,7 +768,7 @@ class PemaliOrchestrator:
                         model=OPENROUTER_MODEL,
                         messages=[
                             {"role": "system", "content": sys_prompt},
-                            {"role": "user", "content": prompt}
+                            {"role": "user", "content": plan_user_prompt}
                         ],
                         tools=[PLAN_TOOL],
                         tool_choice="auto",
@@ -741,7 +799,7 @@ class PemaliOrchestrator:
                         model=OPENROUTER_MODEL,
                         messages=[
                             {"role": "system", "content": sys_prompt},
-                            {"role": "user", "content": prompt}
+                            {"role": "user", "content": plan_user_prompt}
                         ],
                         tools=[PLAN_TOOL],
                         tool_choice="auto",
@@ -762,7 +820,8 @@ class PemaliOrchestrator:
                     if manager_narrative:
                         await telemetry.emit(TelemetryEvent(
                             trace_id=trace_id, node_id="manager", node_type="Manager",
-                            state=NodeState.DONE, narrative=manager_narrative
+                            state=NodeState.DONE, narrative=manager_narrative,
+                            metadata={"type": "chat_response"}
                         ))
                     return manager_narrative or "Halo! Ada yang bisa saya bantu terkait audit lingkungan Bali?"
 
@@ -780,6 +839,30 @@ class PemaliOrchestrator:
                 ))
                 self.context_chain["plan"] = plan
                 self.context_chain["plan_narrative"] = manager_narrative or ""
+
+                # S5: Emit plan event for /agentic live feed
+                plan_event_metadata: Dict[str, Any] = {
+                    "phase": "execute", "phase_step": "plan",
+                    "plan": [
+                        {
+                            "task_id": t.task_id,
+                            "agent": t.target_agent,
+                            "intent": t.intent[:150],
+                            "depends_on": t.depends_on,
+                        }
+                        for t in plan.tasks
+                    ]
+                }
+                # Attach case info if autonomous mode
+                if self.mode == "autonomous":
+                    plan_event_metadata["case_id"] = getattr(self, 'case_title', None)
+                    plan_event_metadata["case_title"] = getattr(self, 'case_title', None)
+                await telemetry.emit(TelemetryEvent(
+                    trace_id=trace_id, node_id="manager", node_type="Manager",
+                    state=NodeState.THINKING,
+                    narrative=f"Rencana audit: {len(plan.tasks)} task — {', '.join(t.target_agent for t in plan.tasks)}",
+                    metadata=plan_event_metadata,
+                ))
                 break
             except Exception as e:
                 if attempt < 2:
@@ -798,10 +881,12 @@ class PemaliOrchestrator:
         if not plan:
             return "Error: Gagal menyusun rencana."
 
+        planned_agents = list(set(t.target_agent for t in plan.tasks))
+
         await telemetry.emit(TelemetryEvent(
             trace_id=trace_id, node_id="manager", node_type="Manager",
             state=NodeState.THINKING, narrative=f"Menjalankan {len(plan.tasks)} agent: {', '.join(t.target_agent for t in plan.tasks)}...",
-            metadata={"phase": "execute", "phase_step": "spawning", "task_count": len(plan.tasks)}
+            metadata={"phase": "execute", "phase_step": "spawning", "task_count": len(plan.tasks), "planned_agents": planned_agents}
         ))
 
         logger.info(f"[Manager] Starting DAG execution with {len(plan.tasks)} tasks")
@@ -946,16 +1031,37 @@ class PemaliOrchestrator:
         raw_results = list(shared_context.values())
 
         logger.info(f"[Manager] Synthesizing final report from {len(raw_results)} results")
-        plan_summary = json.dumps([
-            {"task_id": t.task_id, "agent": t.target_agent, "intent": t.intent}
-            for t in plan.tasks
-        ])
+
+        # Siapkan hasil module dengan konteks — task ID di-anonymize, tapi tool_name + agent_hint tetap
+        anon_successful = []
+        for i, r in enumerate(raw_results):
+            if "_ERROR_" in r:
+                continue
+            entries = []
+            for key, val in r.items():
+                entry = {"tool": key}
+                if isinstance(val, dict):
+                    entry["agent_hint"] = val.get("agent_hint", "")
+                    if "data" in val:
+                        entry["data"] = val["data"]
+                    elif "output" in val:
+                        entry["data"] = val["output"]
+                    else:
+                        entry["data"] = val
+                else:
+                    entry["data"] = val
+                entries.append(entry)
+            anon_successful.append({"task_index": i + 1, "results": entries})
+
+        anon_failed = []
+        for i, (tid, info) in enumerate(failed_tasks.items()):
+            anon_failed.append({"task_index": i+1, "agent": info.get("agent", "unknown"), "error": info.get("error", "unknown"), "error_type": info.get("error_type", "")})
+
         synth_input = {
             "user_request": self.context_chain["user_request"],
-            "plan_summary": plan_summary,
             "execution_results": {
-                "successful": [r for r in raw_results if "_ERROR_" not in r],
-                "failed": [{"task_id": tid, **info} for tid, info in failed_tasks.items()],
+                "successful": anon_successful,
+                "failed": anon_failed,
             },
             "validation_summary": validate_summary,
             "re_spawn_attempts": re_spawn_log,
@@ -964,8 +1070,23 @@ class PemaliOrchestrator:
 
         synth_system = (
             "Anda adalah Report Synthesizer untuk audit lingkungan Bali.\n"
-            "NARASI: ceritakan dulu ringkasan temuan audit dalam bahasa Indonesia.\n"
-            "Setelah narasi, gunakan tool generate_report untuk output laporan final."
+            "TUGAS: Generate laporan audit berdasarkan DATA NYATA dari sensor/modul di bawah.\n\n"
+            "# FORMAT LAPORAN (WAJIB)\n"
+            "1. Gunakan markdown heading: # untuk judul utama, ## untuk section, ### untuk subsection\n"
+            "2. JANGAN gunakan === atau --- sebagai separator section — gunakan heading markdown\n"
+            "3. JANGAN gunakan ALL CAPS untuk heading — gunakan Title Case atau Kalimat Biasa\n"
+            "4. Struktur: # Judul Laporan → ## Ringkasan Eksekutif → ## Temuan → ## Rekomendasi → ## Kesimpulan\n"
+            "5. Gunakan bullet points dan numbered list untuk data sensor\n"
+            "6. Paragraf pendek (max 4 kalimat per paragraf)\n\n"
+            "# ATURAN DATA\n"
+            "1. BACA semua data di execution_results dengan saksama — setiap field.\n"
+            "2. GUNAKAN data beneran dari sensor — jangan mengarang atau menggeneralisasi.\n"
+            "3. Jika data sensor menyebutkan angka/lokasi/spesifik, sebutkan dalam laporan.\n"
+            "4. JANGAN invent data — jika data kosong/null, tulis 'Tidak tersedia' bukan mengarang.\n"
+            "5. Jangan sebutkan nama agen internal (geo_agent, osint_agent, dll), nama tool, atau struktur task.\n"
+            "6. Jangan sebutkan 'Task Index' atau 'Rencana Audit' atau 'Execution Results'.\n"
+            "7. FOKUS pada: temuan, data sensor, pola dan tren, analisis, rekomendasi, kesimpulan.\n"
+            "8. Gunakan tool generate_report untuk output laporan final."
         )
         synth_payload = [
             {"role": "system", "content": synth_system},
@@ -1045,6 +1166,44 @@ class PemaliOrchestrator:
             logger.critical(f"[Manager] {report[:300]}")
             logger.critical(f"[Manager] =========================")
 
+            # Retry jika report kosong — synthesis mungkin timeout
+            if not report or len(report.strip()) < 100:
+                logger.warning("[Manager] Synthesis returned empty report — retrying with extended timeout")
+                try:
+                    res_retry = await llm.chat.completions.create(
+                        model=OPENROUTER_MODEL,
+                        messages=synth_payload,
+                        tools=synth_tools,
+                        tool_choice={"type": "function", "function": {"name": "generate_report"}},
+                        timeout=120.0,
+                    )
+                    msg = res_retry.choices[0].message
+                    synth_narrative = msg.content or synth_narrative
+                    if msg.tool_calls:
+                        report = json.loads(msg.tool_calls[0].function.arguments).get("report", "")
+                    if not report:
+                        report = msg.content or ""
+                    logger.info(f"[Manager] Synthesis retry got {len(report)} chars")
+                except Exception as e2:
+                    logger.error(f"[Manager] Synthesis retry failed: {e2}")
+
+            # Validasi: cek apakah report benar-benar merujuk data module
+            if report and len(report) > 200:
+                data_keywords = []
+                for task in anon_successful:
+                    for entry in task.get("results", []):
+                        hint = entry.get("agent_hint", "")
+                        if hint:
+                            words = [w for w in hint.lower().split() if len(w) > 4]
+                            data_keywords.extend(words[:10])
+                if data_keywords:
+                    matched = sum(1 for kw in data_keywords if kw in report.lower())
+                    ratio = matched / len(data_keywords)
+                    if ratio < 0.1 and len(data_keywords) > 3:
+                        logger.warning(f"[Manager] Report validation: hanya {matched}/{len(data_keywords)} keyword dari module data yang muncul di report (ratio={ratio:.2f}) — kemungkinan model tidak merujuk data sensor")
+                    else:
+                        logger.info(f"[Manager] Report validation: {matched}/{len(data_keywords)} keyword muncul (ratio={ratio:.2f})")
+
         except Exception as e:
             logger.error(f"[Manager] Synthesis LLM call failed: {e}")
             await telemetry.emit(TelemetryEvent(
@@ -1096,6 +1255,14 @@ class PemaliOrchestrator:
                 state=NodeState.ERROR, narrative=f"Cognitive Memory extraction (non-critical): {str(e)[:100]}"
             ))
 
+        # Emit synthesis DONE event for frontend auto-redirect
+        if report:
+            await telemetry.emit(TelemetryEvent(
+                trace_id=trace_id, node_id="synthesis", node_type="Manager",
+                state=NodeState.DONE, narrative=report,
+                metadata={"phase": "synthesis", "type": "final_report", "session_id": self.session_id}
+            ))
+
         await telemetry.emit(TelemetryEvent(
             trace_id=trace_id, node_id="manager", node_type="Manager",
             state=NodeState.DONE, narrative=report,
@@ -1103,6 +1270,258 @@ class PemaliOrchestrator:
         ))
         logger.info(f"[Manager] Emitting final DONE event with report")
 
-        await asyncio.to_thread(store_semantic_memory, self.session_id, f"Audit Result: {report}")
+        # ── SPRINT 5: Save to DB + ChromaDB paralel ──
+        try:
+            await asyncio.gather(
+                asyncio.to_thread(self._save_audit_log, report, shared_context, failed_tasks),
+                asyncio.to_thread(self._save_raw_sensor_data, shared_context),
+                asyncio.to_thread(store_semantic_memory, self.session_id, f"Audit Result: {report}"),
+            )
+            logger.info(f"[Manager] DB saves dispatched (PostgreSQL + ChromaDB)")
+        except Exception as e:
+            logger.error(f"[Manager] DB save error (non-critical): {e}")
+
         logger.info(f"[Manager] Semantic memory stored. Run complete.")
+
+        # ── Save full JSON session dump ──
+        try:
+            self._save_full_json(report, shared_context, failed_tasks, trace_id)
+        except Exception as e:
+            logger.error(f"[Save] Full JSON error (non-critical): {e}")
+
         return report
+
+    # ═════════════════════════════════════════════════════════════
+    # SPRINT 5 — Database persistence helpers
+    # ═════════════════════════════════════════════════════════════
+
+    def _save_audit_log(self, report: str, shared_context: Dict, failed_tasks: Dict):
+        """Save final report to audit_logs table."""
+        if not report or len(report.strip()) < 50:
+            logger.warning(f"[Save] Skipping empty report for session {self.session_id}")
+            return
+
+        db = SessionLocal()
+        try:
+            # Extract location and issue_type from context
+            if self.mode == "autonomous" and self.case_title:
+                location = self.case_title[:120]
+            else:
+                location = self.context_chain.get("user_request", "")[:120] if self.context_chain else ""
+            issue_type = ""
+            if shared_context:
+                # Try to extract from first successful result
+                for v in shared_context.values():
+                    if isinstance(v, dict) and "_ERROR_" not in v:
+                        issue_type = list(v.keys())[0] if v else ""
+                        break
+
+            # Build THK alignment from module outputs
+            thk = {
+                "parahyangan": "Data audit dikumpulkan dengan integritas dan divalidasi melalui pipeline 4-fase.",
+                "pawongan": f"Laporan tersedia untuk transparansi. {len(shared_context)} agent berkontribusi.",
+                "palemahan": "Audit ini mendukung kelestarian lingkungan Bali melalui deteksi dini perubahan kondisi lingkungan."
+            }
+
+            sub_agents = list(set(
+                t.get("target_agent", "") or t.get("agent", "")
+                for t in (self.context_chain.get("plan", MasterPlan(tasks=[])).model_dump().get("tasks", [])
+                         if self.context_chain and self.context_chain.get("plan") else [])
+            ))
+
+            tool_count = sum(
+                len(v) if isinstance(v, dict) else 1
+                for v in shared_context.values()
+                if isinstance(v, dict) and "_ERROR_" not in v
+            )
+
+            duration_ms = round((time.time() - self._started_at) * 1000)
+
+            # S5: Fix title — autonomous pakai case_title, bukan system prompt
+            if self.mode == "autonomous":
+                if self.case_title:
+                    report_title = self.case_title[:120]
+                else:
+                    # Fallback: first meaningful line of report
+                    first_line = (report or "").split('\n')[0].strip('# -').strip()
+                    report_title = first_line[:120] if first_line else "Laporan Audit Otonom"
+            else:
+                report_title = (self.context_chain.get("user_request", "") or "")[:120] if self.context_chain else ""
+
+            # S5: Clean metadata prompt — jangan kirim full system prompt
+            if self.mode == "autonomous":
+                prompt_saved = (self.case_title or "")[:200]
+            else:
+                prompt_saved = (self.context_chain.get("user_request", "") or "")[:200] if self.context_chain else ""
+
+            log = AuditLog(
+                session_id=self.session_id,
+                source=self.source,
+                title=report_title or "Laporan Audit",
+                priority=self.priority,
+                location=location,
+                issue_type=issue_type or "environmental_audit",
+                narrative_report=report,
+                thk_alignment=thk,
+                metadata_json={
+                    "prompt": prompt_saved,
+                    "sub_agents": sub_agents,
+                    "phases": ["planning", "execute", "validate", "synthesis", "done"],
+                    "tool_calls": tool_count,
+                    "tool_success": tool_count - len(failed_tasks),
+                    "tool_errors": len(failed_tasks),
+                    "failed_tasks": {tid: info.get("error", "unknown") for tid, info in failed_tasks.items()},
+                    "duration_ms": duration_ms,
+                },
+            )
+            db.add(log)
+            db.commit()
+            log_id = log.id
+            logger.info(f"[Save] AuditLog #{log.id} saved (source={self.source}, priority={self.priority})")
+
+            # Save report as .txt file jika ada konten
+            if report and len(report.strip()) > 50:
+                try:
+                    reports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports")
+                    os.makedirs(reports_dir, exist_ok=True)
+
+                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_title = re.sub(r'[^\w\s-]', '', report_title or "laporan")[:80].strip().replace(' ', '_')
+                    filename = f"{ts}_{safe_title}_{log_id}.txt"
+                    filepath = os.path.join(reports_dir, filename)
+
+                    header = f"{'='*60}\nPEMALI Audit Report #{log_id}\n{'='*60}\n"
+                    header += f"Title: {report_title}\n"
+                    header += f"Priority: {self.priority}/10\n"
+                    header += f"Source: {self.source}\n"
+                    header += f"Created: {ts}\n"
+                    header += f"{'='*60}\n\n"
+
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write(header + report)
+
+                    logger.info(f"[Save] Report saved to {filepath}")
+                except Exception as e:
+                    logger.warning(f"[Save] Failed to write report file: {e}")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"[Save] AuditLog failed: {e}")
+        finally:
+            db.close()
+
+    def _save_raw_sensor_data(self, shared_context: Dict):
+        """Save each successful sub-agent result to raw_sensor_data table."""
+        db = SessionLocal()
+        try:
+            count = 0
+            for task_id, data in shared_context.items():
+                if not data or "_ERROR_" in data:
+                    continue
+                if isinstance(data, dict):
+                    for tool_key, tool_data in data.items():
+                        if tool_key.startswith("_"):
+                            continue
+                        record = RawSensorData(
+                            session_id=self.session_id,
+                            agent_name=task_id,
+                            task_id=task_id,
+                            tool_name=tool_key,
+                            raw_payload=tool_data if isinstance(tool_data, dict) else {"value": str(tool_data)},
+                        )
+                        db.add(record)
+                        count += 1
+                else:
+                    record = RawSensorData(
+                        session_id=self.session_id,
+                        agent_name=task_id,
+                        task_id=task_id,
+                        tool_name="llm_response",
+                        raw_payload={"response": str(data)[:5000]},
+                    )
+                    db.add(record)
+                    count += 1
+
+            if count > 0:
+                db.commit()
+                logger.info(f"[Save] RawSensorData: {count} records saved")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"[Save] RawSensorData failed: {e}")
+        finally:
+            db.close()
+
+    def _save_full_json(self, report: str, shared_context: Dict, failed_tasks: Dict, trace_id: str):
+        """Save full session JSON to backend/reports/ — all data for one case."""
+        if not report or len(report.strip()) < 50:
+            return
+
+        ctx = self.context_chain or {}
+        plan = ctx.get("plan")
+
+        # Extract agent results from shared_context
+        agents_results = {}
+        for task_id, data in shared_context.items():
+            if data and "_ERROR_" in data:
+                agents_results[task_id] = {"status": "failed", "error": str(data["_ERROR_"])}
+            elif isinstance(data, dict):
+                tools = {}
+                for k, v in data.items():
+                    if not k.startswith("_"):
+                        tools[k] = v
+                agents_results[task_id] = {"status": "success", "tools": tools}
+            else:
+                agents_results[task_id] = {"status": "success", "response": str(data)[:2000]}
+
+        # Plan tasks
+        plan_tasks = []
+        if plan and hasattr(plan, "tasks"):
+            plan_tasks = [
+                {"task_id": t.task_id, "agent": t.target_agent, "intent": t.intent, "depends_on": t.depends_on}
+                for t in plan.tasks
+            ]
+
+        # Summary
+        total_agents = len(plan_tasks)
+        total_failed = len(failed_tasks)
+
+        session = {
+            "meta": {
+                "trace_id": trace_id,
+                "session_id": self.session_id,
+                "prompt": ctx.get("user_request", ""),
+                "mode": self.mode,
+                "source": self.source,
+                "priority": self.priority,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+            "plan": {
+                "narrative": ctx.get("plan_narrative", ""),
+                "tasks": plan_tasks,
+            },
+            "execution": {
+                "narratives": ctx.get("execute_narrative", []),
+                "validate_summary": ctx.get("validate_summary", ""),
+                "re_spawn_log": ctx.get("re_spawn_log", []),
+            },
+            "agents": agents_results,
+            "failed_tasks": {tid: str(info.get("error", "unknown"))[:500] for tid, info in failed_tasks.items()},
+            "final_report": report,
+            "summary": {
+                "agents_total": total_agents,
+                "agents_success": total_agents - total_failed,
+                "agents_failed": total_failed,
+            },
+        }
+
+        reports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_id = re.sub(r'[^\w-]', '', self.session_id)[:30]
+        filename = f"{ts}_{safe_id}_full.json"
+        filepath = os.path.join(reports_dir, filename)
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(session, f, indent=2, ensure_ascii=False, default=str)
+
+        logger.info(f"[Save] Full JSON saved to {filepath} ({len(json.dumps(session))} bytes)")

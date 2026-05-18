@@ -5,8 +5,11 @@ __pycache__/
 **/venv/
 **/.venv/
 **/.env
-*.log
+.env.local
+.env.example
+*.egg-info/
 .pytest_cache/
+backend/reports/
 
 # Node / Next.js
 frontend/node_modules/
@@ -33,7 +36,31 @@ chroma_db/
 scratch/
 logs/
 backups/
-backend/logs/sessions/
+backend/logs/
 (app)/
 .opencode/
 graphify-out/
+
+# Generated docs & artifacts
+ARCHITECTURE.html
+sprint-flow.html
+index.html
+PEMALI_Presentation.pptx
+pemali-logo.png
+*.pdf
+create_pptx.js
+generate_logo_*.py
+test_module.py
+run.sh
+
+# Scratch / notes
+/contoh\ new\ module/
+/new\ ask\ fitur/
+w7panel*/
+ROADMAP.md
+AUTONOMOUS_SWARM_SPEC.md
+SPRINT_5_GUIDE.md
+SPRINT_5_OPTIMIZATION.md
+
+# Old project copy
+PEMALI-bgus/

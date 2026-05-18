@@ -3,14 +3,17 @@
 import { useEffect, useRef } from "react";
 import { useTelemetryStore } from "@/stores/telemetryStore";
 
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://10.10.20.254:8000";
+
 export default function NarrativeStream() {
   const { addEvent, setConnected } = useTelemetryStore();
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     const connect = () => {
-      console.log("[SSE] Connecting to /api/telemetry...");
-      const es = new EventSource("/api/telemetry");
+      const url = `${BACKEND}/api/telemetry`;
+      console.log("[SSE] Connecting to", url);
+      const es = new EventSource(url);
 
       es.onopen = () => {
         console.log("[SSE] Connection opened");
@@ -18,18 +21,16 @@ export default function NarrativeStream() {
       };
 
       es.onmessage = (e) => {
-        console.log("[SSE] Message received:", e.data);
         try {
           const event = JSON.parse(e.data);
-          console.log("[SSE] Parsed event:", event);
           addEvent(event);
         } catch (err) {
-          console.error("[SSE] Parse error:", err, "Raw data:", e.data);
+          console.error("[SSE] Parse error:", err);
         }
       };
 
       es.onerror = () => {
-        console.error("[SSE] Connection error");
+        console.warn("[SSE] Connection error — retrying in 3s");
         setConnected(false);
         es.close();
         setTimeout(connect, 3000);
@@ -41,10 +42,7 @@ export default function NarrativeStream() {
     connect();
 
     return () => {
-      if (esRef.current) {
-        console.log("[SSE] Closing connection");
-        esRef.current.close();
-      }
+      if (esRef.current) esRef.current.close();
     };
   }, [addEvent, setConnected]);
 

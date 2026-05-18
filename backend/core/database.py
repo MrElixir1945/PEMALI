@@ -27,20 +27,27 @@ class AgentMemory(Base):
 class AutonomousTask(Base):
     __tablename__ = "autonomous_tasks"
     id = Column(Integer, primary_key=True, index=True)
+    task_type = Column(String, default="direct", index=True)  # SPRINT-5: "autonomous" | "direct"
+    priority = Column(Integer, default=5)                      # SPRINT-5: 1-10
     execute_at = Column(DateTime, index=True)
     intent_description = Column(Text)
     context_snapshot = Column(JSON)
     status = Column(String, default="pending")
+    retries = Column(Integer, default=0)                       # SPRINT-5
+    last_error = Column(Text, nullable=True)                   # SPRINT-5
     created_at = Column(DateTime, default=get_utc_now)
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, index=True, nullable=True)
-    location = Column(String, index=True) # Optimized: Added index
-    issue_type = Column(String, index=True) # Optimized: Added index
+    source = Column(String, default="user", index=True)  # SPRINT-5: "autonomous" | "user"
+    title = Column(Text, nullable=True)                    # SPRINT-5
+    priority = Column(Integer, default=5)                  # SPRINT-5: 1-10
+    location = Column(String, index=True)
+    issue_type = Column(String, index=True)
     narrative_report = Column(Text)
-    thk_alignment = Column(String)
+    thk_alignment = Column(JSON, nullable=True)            # SPRINT-5: String → JSON
     metadata_json = Column(JSON)
     created_at = Column(DateTime, default=get_utc_now)
 
@@ -48,9 +55,18 @@ class RawSensorData(Base):
     __tablename__ = "raw_sensor_data"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, index=True)
+    agent_name = Column(String, nullable=True)    # SPRINT-5
+    task_id = Column(String, nullable=True)        # SPRINT-5
     tool_name = Column(String, index=True)
     raw_payload = Column(JSON)
     created_at = Column(DateTime, default=get_utc_now)
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    session_id = Column(String, primary_key=True, index=True)
+    title = Column(String, nullable=True)
+    created_at = Column(DateTime, default=get_utc_now)
+    last_activity = Column(DateTime, default=get_utc_now, onupdate=get_utc_now)
 
 class MemoryNode(Base):
     __tablename__ = "memory_nodes"

@@ -50,6 +50,28 @@ def store_semantic_memory(session_id: str, text_content: str, metadata: Dict[str
         logging.error(f"[Memory Layer] RAG Store Error: {str(e)}") # Fixed: Silent failure
         return False
 
+def query_semantic_scoped(query_text: str, session_id: str, n_results: int = 3) -> List[Dict[str, Any]]:
+    """Query ChromaDB dengan filter session_id — untuk AiBubble scoped RAG."""
+    try:
+        results = audit_collection.query(
+            query_texts=[query_text],
+            n_results=n_results,
+            where={"session_id": session_id}
+        )
+        formatted = []
+        if results['documents'] and results['documents'][0]:
+            for i in range(len(results['documents'][0])):
+                formatted.append({
+                    "content": results['documents'][0][i],
+                    "metadata": results['metadatas'][0][i],
+                    "distance": results['distances'][0][i] if 'distances' in results else None
+                })
+        return formatted
+    except Exception as e:
+        logging.error(f"[Memory Layer] Scoped RAG Query Error: {str(e)}")
+        return []
+
+
 def query_semantic(query_text: str, n_results: int = 3) -> List[Dict[str, Any]]:
     try:
         results = audit_collection.query(query_texts=[query_text], n_results=n_results)

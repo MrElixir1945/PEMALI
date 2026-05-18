@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { SessionEntry } from "./shared";
 import { C } from "./shared";
 
@@ -18,6 +19,7 @@ export default function Sidebar({
   onSelectSession: (id: string) => void;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
+  const router = useRouter();
 
   return (
     <div style={{
@@ -130,6 +132,7 @@ export default function Sidebar({
                     {new Date(s.timestamp).toLocaleTimeString("id-ID", {
                       hour: "2-digit",
                       minute: "2-digit",
+                      timeZone: "Asia/Makassar",
                     })}
                   </div>
                 </div>
@@ -137,6 +140,63 @@ export default function Sidebar({
             </button>
           );
         })}
+      </div>
+
+      {/* Nav links */}
+      <div style={{
+        borderTop: `0.5px solid ${C.borderLight}`,
+        flexShrink: 0,
+      }}>
+        {open && (
+          <div style={{
+            fontSize: 9,
+            letterSpacing: "0.12em",
+            color: C.textMuted,
+            padding: "12px 16px 8px",
+            textTransform: "uppercase",
+            fontWeight: 500,
+          }}>
+            Navigasi
+          </div>
+        )}
+        {[
+          { id: "laporan", label: "Laporan", path: "/laporan", icon: "☰" },
+          { id: "agentic", label: "Autonomous", path: "/agentic", icon: "◇" },
+          { id: "dev", label: "Dev", path: "/dev", icon: "⚙" },
+        ].map((nav) => (
+          <button
+            key={nav.id}
+            onClick={() => router.push(nav.path)}
+            title={nav.label}
+            style={{
+              width: "100%",
+              textAlign: "left" as const,
+              padding: open ? "7px 14px" : "7px 0",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: open ? "flex-start" : "center",
+              gap: open ? 10 : 0,
+              background: "transparent",
+              border: "none",
+              borderLeft: "2px solid transparent",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+              fontSize: open ? 11 : 14,
+              color: C.textSec,
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = C.text;
+              (e.currentTarget as HTMLButtonElement).style.background = "rgba(26,25,20,0.03)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = C.textSec;
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+            }}
+          >
+            <span style={{ fontSize: 12, flexShrink: 0 }}>{nav.icon}</span>
+            {open && <span style={{ fontWeight: 400 }}>{nav.label}</span>}
+          </button>
+        ))}
       </div>
 
       {/* New audit */}

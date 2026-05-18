@@ -3,9 +3,18 @@ import asyncio
 import datetime
 import time
 import sys
+import os
+
+# Ensure project root is in Python path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Cross-process: worker emits to FastAPI SSE via HTTP POST
+os.environ.setdefault("TELEMETRY_REMOTE_URL", "http://localhost:8000/api/telemetry/publish")
+
 from sqlalchemy.orm import Session
 from backend.core.database import SessionLocal, init_db, AutonomousTask
 from backend.core.orchestrator import PemaliOrchestrator
+from backend.core.autonomous_mind import AutonomousMind
 from backend.core.telemetry import telemetry
 from backend.core.models import TelemetryEvent, NodeState
 
@@ -17,28 +26,72 @@ logger = logging.getLogger("WorkerDaemon")
 WORKER_CONCURRENCY = 5
 worker_semaphore = asyncio.Semaphore(WORKER_CONCURRENCY)
 
-async def execute_autonomous_task(task_id: int, intent_description: str):
-    """Berjalan terisolasi di background dengan kontrol semaphore."""
+
+async def execute_autonomous_mind(task: AutonomousTask):
+    """Agent Otak — full strategic loop: decide cases + spawn runners + self-schedule."""
     async with worker_semaphore:
-        trace_id = f"auto-{task_id}-{int(time.time())}"
-        
+        trace_id = f"auto-mind-{task.id}-{int(time.time())}"
+
         await telemetry.emit(TelemetryEvent(
             trace_id=trace_id, node_id="worker_daemon", node_type="System",
-            state=NodeState.THINKING, narrative=f"Mengeksekusi rencana otonom: {intent_description}"
+            state=NodeState.THINKING, narrative=f"Agent Otak diaktifkan untuk siklus otonom #{task.id}",
+            metadata={"task_id": task.id, "priority": task.priority}
         ))
-        
-        agent = PemaliOrchestrator(session_id=trace_id)
+
+        mind = AutonomousMind(trace_id)
         try:
-            # 1. Jalankan logika AI (Ini memakan waktu lama)
+            overview = await mind.wake(task)
+
+            with SessionLocal() as db:
+                t = db.query(AutonomousTask).filter(AutonomousTask.id == task.id).first()
+                if t:
+                    t.status = "completed"
+                    db.commit()
+
+            await telemetry.emit(TelemetryEvent(
+                trace_id=trace_id, node_id="worker_daemon", node_type="System",
+                state=NodeState.DONE,
+                narrative=f"Siklus otonom selesai: {overview.get('total_cases', 0)} kasus diaudit. "
+                         f"{overview.get('success', 0)} sukses, {overview.get('failed', 0)} gagal."
+            ))
+        except Exception as e:
+            logger.error(f"AutonomousMind task {task.id} failed: {e}")
+            with SessionLocal() as db:
+                t = db.query(AutonomousTask).filter(AutonomousTask.id == task.id).first()
+                if t:
+                    t.status = "failed"
+                    t.retries = (t.retries or 0) + 1
+                    t.last_error = str(e)[:500]
+                    db.commit()
+
+            await telemetry.emit(TelemetryEvent(
+                trace_id=trace_id, node_id="worker_daemon", node_type="System",
+                state=NodeState.ERROR, narrative=f"Siklus otonom gagal: {str(e)[:200]}"
+            ))
+
+
+async def execute_autonomous_task(task_id: int, intent_description: str):
+    """Direct execution — jalankan orchestrator langsung (one-shot autonomous task)."""
+    async with worker_semaphore:
+        trace_id = f"auto-{task_id}-{int(time.time())}"
+
+        await telemetry.emit(TelemetryEvent(
+            trace_id=trace_id, node_id="worker_daemon", node_type="System",
+            state=NodeState.THINKING, narrative=f"Mengeksekusi rencana otonom: {intent_description[:100]}"
+        ))
+
+        agent = PemaliOrchestrator(session_id=trace_id)
+        # Set autonomous mode for direct tasks
+        agent.set_autonomous_mode(source="autonomous", priority=5, case_title=intent_description[:80])
+        try:
             await agent.run(intent_description)
-            
-            # 2. Update status ke completed (Gunakan session baru agar tidak stale)
+
             with SessionLocal() as db:
                 task = db.query(AutonomousTask).filter(AutonomousTask.id == task_id).first()
                 if task:
                     task.status = "completed"
                     db.commit()
-                
+
             await telemetry.emit(TelemetryEvent(
                 trace_id=trace_id, node_id="worker_daemon", node_type="System",
                 state=NodeState.DONE, narrative="Tugas otonom berhasil diselesaikan."
@@ -49,17 +102,20 @@ async def execute_autonomous_task(task_id: int, intent_description: str):
                 task = db.query(AutonomousTask).filter(AutonomousTask.id == task_id).first()
                 if task:
                     task.status = "failed"
+                    task.retries = (task.retries or 0) + 1
+                    task.last_error = str(e)[:500]
                     db.commit()
-                
+
             await telemetry.emit(TelemetryEvent(
                 trace_id=trace_id, node_id="worker_daemon", node_type="System",
-                state=NodeState.ERROR, narrative=f"Kegagalan eksekusi otonom: {str(e)}"
+                state=NodeState.ERROR, narrative=f"Kegagalan eksekusi otonom: {str(e)[:200]}"
             ))
+
 
 async def process_autonomous_queue():
     """Loop utama, memproses semua task yang jatuh tempo sekaligus."""
     logger.info("Initializing database tables...")
-    
+
     max_retries = 5
     for attempt in range(max_retries):
         try:
@@ -73,32 +129,39 @@ async def process_autonomous_queue():
             else:
                 logger.error("Max retries reached. Exiting.")
                 sys.exit(1)
-    
+
     logger.info("Tick Engine started. Monitoring autonomous_tasks table...")
-    
+
     while True:
         try:
             with SessionLocal() as db:
                 now = datetime.datetime.now(datetime.timezone.utc)
-                
-                # AMBIL SEMUA task yang pending dan sudah masuk waktunya
+
+                # SPRINT-5: Ambil task sorted by priority DESC (urgensi dulu)
                 tasks = db.query(AutonomousTask).filter(
                     AutonomousTask.status == "pending",
                     AutonomousTask.execute_at <= now
+                ).order_by(
+                    AutonomousTask.priority.desc(),
+                    AutonomousTask.execute_at.asc()
                 ).all()
-                
+
                 for task in tasks:
-                    logger.info(f"Triggering Task ID: {task.id} - {task.intent_description}")
+                    logger.info(f"Triggering Task ID: {task.id} type={task.task_type} priority={task.priority} — {task.intent_description[:80] if task.intent_description else '-'}")
                     task.status = "running"
                     db.commit()
-                    
-                    # Jalankan di background
-                    asyncio.create_task(execute_autonomous_task(task.id, task.intent_description))
-                
+
+                    # SPRINT-5: Routing berdasarkan task_type
+                    if task.task_type == "autonomous":
+                        asyncio.create_task(execute_autonomous_mind(task))
+                    else:
+                        asyncio.create_task(execute_autonomous_task(task.id, task.intent_description or ""))
+
         except Exception as e:
             logger.error(f"Runtime Loop Error: {e}")
-            
+
         await asyncio.sleep(15)
+
 
 if __name__ == "__main__":
     try:

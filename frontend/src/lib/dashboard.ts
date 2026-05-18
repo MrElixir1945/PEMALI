@@ -37,8 +37,10 @@ export interface TokenEvent {
 
 export interface Session {
   id: string;
-  label: string;
-  ts: number;
+  title?: string;
+  label?: string;
+  last_activity?: string;
+  ts?: number;
 }
 
 export interface ChatMessage {
@@ -88,6 +90,7 @@ export function fmtTime(ts: number) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    timeZone: "Asia/Makassar",
   });
 }
 
@@ -162,6 +165,59 @@ export function extractPhases(events: TelemetryEvent[]): PhaseSegment[] {
     }
   }
   return Array.from(phaseMap.values());
+}
+
+// ── DAG Plan Extraction ──
+export interface DagPlan {
+  task_id: string;
+  agent: string;
+  intent: string;
+  depends_on: string[];
+}
+
+export function extractDagFromPlan(events: TelemetryEvent[]): {
+  agents: string[];
+  tasks: DagPlan[];
+} {
+  const planEvent = events.find(
+    (e) => e.node_id === "manager" && e.metadata?.phase_step === "plan"
+  );
+
+  if (planEvent?.metadata?.plan) {
+    const tasks = planEvent.metadata.plan as DagPlan[];
+    const sorted: DagPlan[] = [];
+    const visited = new Set<string>();
+
+    function visit(taskId: string) {
+      if (visited.has(taskId)) return;
+      visited.add(taskId);
+      const task = tasks.find((t) => t.task_id === taskId);
+      if (!task) return;
+      for (const dep of task.depends_on) {
+        visit(dep);
+      }
+      sorted.push(task);
+    }
+
+    for (const task of tasks) {
+      visit(task.task_id);
+    }
+
+    const agents = [...new Set(sorted.map((t) => t.agent))];
+    return { agents, tasks: sorted };
+  }
+
+  // Fallback: extract unique agent node_ids in first-seen order (history mode)
+  const knownAgents = ["geo_agent", "water_agent", "fire_agent", "osint_agent", "scheduler_agent"];
+  const seen: string[] = [];
+  for (const e of events) {
+    if (e.node_id && e.node_id !== "manager" && e.node_id !== "synthesis" && e.node_id !== "system") {
+      if (!seen.includes(e.node_id) && knownAgents.includes(e.node_id)) {
+        seen.push(e.node_id);
+      }
+    }
+  }
+  return { agents: seen, tasks: [] };
 }
 
 export function computeProgress(events: TelemetryEvent[]) {

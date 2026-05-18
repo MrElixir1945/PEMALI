@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from typing import AsyncGenerator
 from backend.core.models import TelemetryEvent, NodeState
 
@@ -9,6 +10,7 @@ logger = logging.getLogger(__name__)
 class TelemetryManager:
     def __init__(self):
         self.queues: list[asyncio.Queue] = []
+        self.remote_url = os.getenv("TELEMETRY_REMOTE_URL", "")
 
     async def subscribe(self) -> AsyncGenerator[str, None]:
         queue = asyncio.Queue()
@@ -29,6 +31,19 @@ class TelemetryManager:
                 self.queues.remove(queue)
                 logging.info(f"[Telemetry] Subscriber removed. Total queues: {len(self.queues)}")
 
+    async def _post_remote(self, data: dict):
+        """Worker process: POST event ke FastAPI agar diteruskan ke SSE subscribers."""
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                res = await client.post(self.remote_url, json=data)
+                if res.status_code == 200:
+                    logger.debug(f"[Telemetry] Remote publish OK: {data.get('node_id')}")
+                else:
+                    logger.warning(f"[Telemetry] Remote publish failed: HTTP {res.status_code}")
+        except Exception as e:
+            logger.warning(f"[Telemetry] Remote publish error: {e}")
+
     async def emit(self, event: TelemetryEvent):
         data = event.model_dump(mode='json')
         for queue in self.queues:
@@ -37,7 +52,10 @@ class TelemetryManager:
             except Exception as e:
                 logger.error(f"[Telemetry] Emit error: {e}")
         if not self.queues:
-            logger.warning(f"[Telemetry] Event emitted but no subscribers: {data.get('node_id')} - {data.get('state')}")
+            if self.remote_url:
+                await self._post_remote(data)
+            else:
+                logger.warning(f"[Telemetry] Event emitted but no subscribers: {data.get('node_id')} - {data.get('state')}")
         await asyncio.sleep(0)
 
 telemetry = TelemetryManager()

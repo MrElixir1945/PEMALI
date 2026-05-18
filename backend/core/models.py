@@ -76,3 +76,33 @@ class SDUIPayload(BaseModel):
     module_name: str = Field(description="Nama modul yang menghasilkan data ini")
     display_config: SDUIConfig = Field(description="Konfigurasi UI untuk data ini")
     content: Dict[str, Any] = Field(description="Data aktual (payload) hasil proses modul")
+
+# ═══════════════════════════════════════════════════════════════════
+# SPRINT 5 — Autonomous Swarm + Laporan Store
+# ═══════════════════════════════════════════════════════════════════
+
+class CaseIntent(BaseModel):
+    """Satu kasus audit yang diputuskan Agent Otak."""
+    case_id: str = Field(..., description="Unique ID kasus, e.g. case-001")
+    title: str = Field(..., min_length=5, description="Judul singkat kasus")
+    intent: str = Field(..., min_length=10, description="Prompt lengkap untuk Agent Run")
+    priority: int = Field(default=5, ge=1, le=10, description="Urgency 1-10")
+    urgency_reason: str = Field(..., description="Kenapa prioritas segitu")
+
+class AskQuestion(BaseModel):
+    """Pertanyaan user untuk AiBubble scoped RAG."""
+    question: str = Field(..., min_length=3, max_length=500)
+
+class TaskCreate(BaseModel):
+    """Bikin autonomous task dari UI."""
+    intent_description: str = Field(..., min_length=5)
+    execute_at: Optional[str] = Field(None, description="ISO8601 timestamp, default now")
+    task_type: str = Field(default="autonomous", pattern="^(autonomous|direct)$")
+    priority: int = Field(default=5, ge=1, le=10)
+    recurrence_minutes: Optional[int] = Field(None, ge=1, description="Recurring interval in minutes")
+
+class LaporanFilter(BaseModel):
+    """Filter untuk GET /api/laporan."""
+    source: Optional[str] = Field(None, pattern="^(autonomous|user)$")
+    location: Optional[str] = None
+    limit: int = Field(default=20, ge=1, le=100)
