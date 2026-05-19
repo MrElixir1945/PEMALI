@@ -12,10 +12,28 @@ CHROMA_PATH = os.getenv("CHROMA_PATH", os.path.join(
 ))
 chroma_client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(allow_reset=False))
 
-multilingual_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="paraphrase-multilingual-MiniLM-L12-v2"
-)
-logging.info(f"[RAG] Embedding model loaded: paraphrase-multilingual-MiniLM-L12-v2")
+class LazySentenceTransformerEF:
+    """Load SentenceTransformer model on first call — not at import time."""
+    def __init__(self, model_name: str):
+        self._model_name = model_name
+        self._ef = None
+
+    def name(self) -> str:
+        return "sentence_transformer"
+
+    def embed_query(self, input: List[str]) -> List[List[float]]:
+        return self.__call__(input)
+
+    def __call__(self, input: List[str]) -> List[List[float]]:
+        if self._ef is None:
+            logging.info(f"[RAG] Loading embedding model: {self._model_name}...")
+            self._ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name=self._model_name
+            )
+            logging.info(f"[RAG] Embedding model loaded: {self._model_name}")
+        return self._ef(input)
+
+multilingual_ef = LazySentenceTransformerEF("paraphrase-multilingual-MiniLM-L12-v2")
 
 audit_collection = chroma_client.get_or_create_collection(
     name="pemali_audit_logs",

@@ -4,7 +4,6 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
-import NarrativeStream from "@/components/pemali/NarrativeStream";
 import AutonomousSwarmPanel from "@/components/pemali/AutonomousSwarmPanel";
 
 export default function AgenticPage() {
@@ -28,18 +27,24 @@ export default function AgenticPage() {
         }}
       />
 
-      <NarrativeStream />
-
       <div className="relative z-10 h-full flex flex-col">
         {/* Header */}
         <header className="flex-shrink-0 px-8 pt-5 pb-0">
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="text-[11px] tracking-wide font-mono mb-2 opacity-40 hover:opacity-70 transition-opacity block"
-            style={{ color: "#7A7670", fontFamily: "var(--font-geist-mono), monospace" }}
-          >
-            &larr; Dashboard
-          </button>
+          <div className="flex gap-4 mb-2 font-mono text-[11px] tracking-wide" style={{ color: "#7A7670", fontFamily: "var(--font-geist-mono), monospace" }}>
+            <button
+              onClick={() => router.push("/")}
+              className="opacity-40 hover:opacity-70 transition-opacity"
+            >
+              &larr; Landing Page
+            </button>
+            <span className="opacity-20">|</span>
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="opacity-40 hover:opacity-70 transition-opacity"
+            >
+              Dashboard
+            </button>
+          </div>
 
           <h1
             className="text-[28px] font-normal leading-tight tracking-[-0.02em] mb-1"

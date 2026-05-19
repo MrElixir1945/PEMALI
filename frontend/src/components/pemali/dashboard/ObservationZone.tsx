@@ -12,9 +12,9 @@ import {
   Globe,
   Calendar,
   FileText,
-  Clock,
   Zap,
 } from "lucide-react";
+import AgentThinkingStream from "@/components/pemali/AgentThinkingStream";
 import { extractDagFromPlan, type TelemetryEvent } from "@/lib/dashboard";
 
 // ── Icons ──
@@ -28,7 +28,6 @@ const Icons = {
   Globe: () => <Globe size={20} />,
   Calendar: () => <Calendar size={20} />,
   FileText: () => <FileText size={20} />,
-  Clock: () => <Clock size={12} />,
   Zap: () => <Zap size={14} />,
 };
 
@@ -269,7 +268,7 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
       .join("\n\n");
   }, [events, activeAgent]);
 
-  const { displayed: typedText, isComplete: typingDone } = useTypewriter(agentNarrative, 30);
+  const { isComplete: typingDone } = useTypewriter(agentNarrative, 30);
 
   // Advance currentIdx when agent is done AND typewriter complete
   useEffect(() => {
@@ -285,23 +284,6 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
       }
     }
   }, [currentIdx, agentOrder, doneSet, typingDone, fastMode]);
-
-  // Narrative for synthesis (from manager synthesis phase + synthesis node)
-  const synthesisNarrative = useMemo(() => {
-    if (!showSynthesis) return "";
-    return events
-      .filter(e =>
-        (e.node_id === "synthesis" && e.narrative) ||
-        (e.node_id === "manager" && e.metadata?.phase === "synthesis" && e.narrative)
-      )
-      .map(e => e.narrative)
-      .join("\n\n");
-  }, [events, showSynthesis]);
-
-  const { displayed: synthText, isComplete: synthDone } = useTypewriter(
-    synthesisNarrative && !isSynthesisDone ? synthesisNarrative : "",
-    30
-  );
 
   // Current tool name for active agent
   const currentTool = useMemo(() => {
@@ -342,12 +324,11 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
                 />
               ) : isActive ? (
                 <WorkflowNode
+                  agentId={agent}
                   title={display?.title || agent.replace(/_/g, " ")}
                   subtitle={display?.subtitle || agent}
                   status={isDone ? "DONE" : "EXECUTING"}
                   icon={display?.icon || <Icons.Globe />}
-                  typedText={fastMode ? undefined : typedText}
-                  isTyping={!typingDone && !fastMode}
                   toolName={currentTool}
                 />
               ) : null}
@@ -359,13 +340,11 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
           <React.Fragment>
             <ConnectorLine />
             <WorkflowNode
+              agentId="manager"
               title="Final Synthesis"
               subtitle="Manager Agent"
               status={isSynthesisDone ? "DONE" : "EXECUTING"}
               icon={<Icons.FileText />}
-              typedText={fastMode ? undefined : (synthText || undefined)}
-              isTyping={!synthDone && !isSynthesisDone}
-              log={isSynthesisDone ? "✅ Laporan audit berhasil disusun dan siap ditinjau." : ""}
             />
           </React.Fragment>
         )}
@@ -375,14 +354,12 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
 }
 
 // ── Workflow Node ──
-function WorkflowNode({ title, subtitle, status, icon, log, typedText, isTyping, toolName }: {
+function WorkflowNode({ agentId, title, subtitle, status, icon, toolName }: {
+  agentId: string,
   title: string,
   subtitle: string,
   status: "PENDING" | "EXECUTING" | "DONE" | "SKIP",
   icon: React.ReactNode,
-  log?: string,
-  typedText?: string,
-  isTyping?: boolean,
   toolName?: string
 }) {
   const isRunning = status === "EXECUTING";
@@ -448,69 +425,25 @@ function WorkflowNode({ title, subtitle, status, icon, log, typedText, isTyping,
             </div>
           )}
 
-          {/* Typewriter thinking text */}
+          {/* AgentThinkingStream — real-time typewriter from SSE agent_thinking events */}
           <AnimatePresence>
-            {typedText !== undefined && (
+            {(status === "EXECUTING" || status === "DONE") && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                className="mt-4 pt-4 border-t border-[var(--pemali-border)]/50"
+                transition={{ duration: 0.25, ease: "easeInOut" }}
               >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="text-[10px] text-[var(--pemali-accent)] font-bold uppercase tracking-widest flex items-center gap-1.5">
-                    <Icons.Clock />
-                    {isTyping ? "Alur Berpikir" : "Log Berpikir"}
-                  </div>
-                  {isTyping && (
-                    <div className="w-2 h-2 rounded-full bg-[var(--pemali-accent)] animate-pulse" />
-                  )}
-                </div>
-                <div className="max-h-64 overflow-y-auto rounded-lg bg-black/10 p-4 font-mono text-[12px] text-[var(--pemali-text-primary)] leading-relaxed whitespace-pre-wrap scrollbar-thin">
-                  <AnimatePresence mode="popLayout">
-                    {typedText ? (
-                      <motion.span
-                        key={typedText.length > 50 ? "typing" : "empty"}
-                        initial={{ opacity: 0.6 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ duration: 0.4 }}
-                      >
-                        {typedText}
-                      </motion.span>
-                    ) : (
-                      <motion.span
-                        key="placeholder"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                      >
-                        {isTyping ? "Menunggu proses..." : "Tidak ada data berpikir"}
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                  {isTyping && <span className="animate-pulse text-[var(--pemali-accent)] ml-0.5">▊</span>}
-                </div>
+                <AgentThinkingStream
+                  agentId={agentId}
+                  agentName={title}
+                  isActive={status === "EXECUTING"}
+                />
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Legacy log section */}
-          {typedText === undefined && (isRunning || (isDone && log)) && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              className="mt-4 pt-4 border-t border-[var(--pemali-border)]/50"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <div className="text-[10px] text-[var(--pemali-accent)] font-bold uppercase tracking-widest flex items-center gap-1.5">
-                  <Icons.Clock />
-                  Log Berpikir
-                </div>
-              </div>
-              <div className="text-[12px] text-[var(--pemali-text-secondary)] leading-relaxed">
-                {log}
-              </div>
-            </motion.div>
-          )}
+
         </div>
       </div>
 
@@ -528,74 +461,18 @@ function WorkflowNode({ title, subtitle, status, icon, log, typedText, isTyping,
 
 import { type Session } from "@/lib/dashboard";
 
-// ── Sidebar ──
+// ── Sidebar ── (removed per user request — only toggle remains in navbar)
 interface SidebarProps {
   sessions: Session[];
   onNewAudit: () => void;
   onSelectSession: (id: string) => void;
-  activeSessionId: string;
+  activeSessionId: string | null;
   isOpen: boolean;
   onToggle: () => void;
 }
 
-export function Sidebar({
-  sessions,
-  onNewAudit,
-  onSelectSession,
-  activeSessionId,
-  isOpen,
-  onToggle,
-}: SidebarProps) {
-  return (
-    <motion.div
-      initial={false}
-      animate={{ width: isOpen ? 280 : 0, opacity: isOpen ? 1 : 0 }}
-      className="h-full border-r border-[var(--pemali-border)] bg-[var(--pemali-surface)] flex flex-col overflow-hidden relative"
-    >
-      <div className="p-6 border-b border-[var(--pemali-border)] flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-lg bg-[var(--pemali-accent)] flex items-center justify-center text-white shadow-lg">
-            <img src="/logo.png" alt="PEMALI" className="w-5 h-5 object-contain" />
-          </div>
-          <span className="text-[15px] font-bold tracking-tight text-[var(--pemali-text-primary)]">PEMALI</span>
-        </div>
-        <button onClick={onToggle} className="p-1.5 hover:bg-[var(--pemali-bg)] rounded-md text-[var(--pemali-text-muted)]">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
-        </button>
-      </div>
-
-      <div className="p-4">
-        <button onClick={onNewAudit} className="w-full py-2.5 px-4 bg-[var(--pemali-accent)] text-white rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Audit Baru
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-2 scrollbar-none">
-        <div className="text-[10px] font-bold text-[var(--pemali-text-muted)] uppercase tracking-widest p-4 pb-2">Sesi Terbaru</div>
-        <div className="flex flex-col gap-1">
-          {sessions.map((s: any) => (
-            <button
-              key={s.id}
-              onClick={() => onSelectSession(s.id)}
-              className={`w-full text-left px-4 py-3 rounded-xl transition-all group ${
-                activeSessionId === s.id ? "bg-[var(--pemali-accent)]/10 text-[var(--pemali-accent)]" : "hover:bg-[var(--pemali-bg)] text-[var(--pemali-text-secondary)]"
-              }`}
-            >
-              <div className="text-[13px] font-medium truncate mb-1">{s.title || s.id}</div>
-              <div className="text-[9px] font-mono opacity-50 uppercase">
-                {s.last_activity ? new Date(s.last_activity).toLocaleDateString("id-ID", {
-                  day: "2-digit",
-                  month: "short",
-                  year: "numeric"
-                }) : ""}
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </motion.div>
-  );
+export function Sidebar(_props: SidebarProps) {
+  return null;
 }
 
 // ── Final Report ──

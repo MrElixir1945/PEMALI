@@ -4,8 +4,11 @@ import os
 import sys
 import traceback
 
-# Ensure project root is in Python path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure project root is in Python path + load .env SEBELUM import backend modules
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PROJECT_ROOT)
+from dotenv import load_dotenv
+load_dotenv(os.path.join(_PROJECT_ROOT, "config", ".env"))
 
 import datetime
 import json
@@ -17,7 +20,6 @@ from fastapi.responses import StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
-from dotenv import load_dotenv
 
 # Import Core Components
 from backend.core.database import SessionLocal, init_db, AuditLog, AgentMemory, AutonomousTask, RawSensorData, ChatSession
@@ -27,8 +29,6 @@ from backend.core.registry import registry
 from backend.core.models import TelemetryEvent, NodeState, CaseIntent, AskQuestion, TaskCreate, LaporanFilter
 from backend.core.memory import query_semantic_scoped
 from backend.core.llm_client import get_llm_client, OPENROUTER_MODEL
-
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", ".env"))
 
 # Configure Logging
 logging.basicConfig(
@@ -286,17 +286,42 @@ def get_history(session_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/status")
 async def get_system_status(db: Session = Depends(get_db)):
-    """Agregasi data untuk Overview Dashboard."""
+    """Agregasi data untuk Overview Dashboard & Monitor page."""
     logger.debug("[/api/status] Status check requested")
     try:
         recent_tasks = db.query(AutonomousTask).order_by(AutonomousTask.id.desc()).limit(5).all()
+        total_reports = db.query(AuditLog).count()
+        total_sessions = db.query(ChatSession).count()
+        recent_reports_q = (
+            db.query(AuditLog)
+            .order_by(AuditLog.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        def severity_label(p: int) -> str:
+            if p >= 8: return "High"
+            if p >= 5: return "Medium"
+            return "Low"
         result = {
             "fastapi_active": True,
             "modules_loaded": len(registry.tools),
             "concurrent_tasks_active": MAX_CONCURRENT_TASKS - agent_semaphore._value,
-            "recent_tasks": [{"id": t.id, "status": t.status, "task_type": t.task_type, "priority": t.priority} for t in recent_tasks]
+            "total_reports": total_reports,
+            "total_sessions": total_sessions,
+            "recent_tasks": [{"id": t.id, "status": t.status, "task_type": t.task_type, "priority": t.priority} for t in recent_tasks],
+            "recent_reports": [
+                {
+                    "id": r.id,
+                    "location": r.location or r.title or "—",
+                    "issue_type": r.issue_type or "environmental_audit",
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "severity": severity_label(r.priority or 5),
+                    "time": r.created_at.strftime("%d %b %Y, %H:%M") if r.created_at else "—",
+                }
+                for r in recent_reports_q
+            ],
         }
-        logger.debug(f"[/api/status] Returning: modules={len(registry.tools)}, tasks={len(recent_tasks)}")
+        logger.debug(f"[/api/status] Returning: modules={len(registry.tools)}, tasks={len(recent_tasks)}, reports={total_reports}")
         return result
     except Exception as e:
         logger.error(f"[/api/status] Error: {e}")

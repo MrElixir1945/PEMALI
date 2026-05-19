@@ -6,6 +6,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import ReportCard from "@/components/pemali/ReportCard";
+import NavBar from "@/components/NavBar";
 import { cn } from "@/lib/utils";
 
 interface ReportSummary {
@@ -69,6 +70,7 @@ export default function LaporanPage() {
 
   return (
     <div className="min-h-screen bg-[var(--pemali-bg)] text-[var(--pemali-text-primary)]">
+      <NavBar />
       <div className="max-w-3xl mx-auto px-5 py-12">
         {/* Header */}
         <motion.div
@@ -77,13 +79,6 @@ export default function LaporanPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.0, 0.0, 0.2, 1] }}
         >
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="text-[12px] text-[var(--pemali-text-muted)] hover:text-[var(--pemali-text-primary)] transition-colors mb-4 inline-flex items-center gap-1 font-mono"
-          >
-            <span>←</span>
-            <span>Dashboard</span>
-          </button>
           <h1 className="text-[28px] font-[500] tracking-[-0.02em] mb-2">
             Laporan Audit
           </h1>

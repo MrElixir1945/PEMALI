@@ -12,3 +12,4 @@ pytest-asyncio>=1.0.0
 pytest-timeout>=2.0.0
 openai
 ddgs
+instaloader>=4.15

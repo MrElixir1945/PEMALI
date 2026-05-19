@@ -1,46 +1,62 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import Link from "next/link";
+import React, { useState, useEffect, useCallback } from "react";
+import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import Footer from "@/components/Footer";
-import { 
-  Activity, 
-  ShieldAlert, 
-  CheckCircle2, 
-  ArrowRight, 
-  Search, 
-  MessageSquare, 
-  MapPin, 
-  Database, 
-  Cpu, 
-  Layers, 
-  Globe 
+import {
+  Flame, Leaf, Cloud, Globe,
+  ArrowRight, Search, MapPin,
+  Activity, CheckCircle2, AlertCircle,
+  Cpu, Database, Clock,
 } from "lucide-react";
-
-interface Task {
-  id: number;
-  status: string;
-}
 
 interface Report {
   id: number;
   location: string;
   issue_type: string;
   created_at: string | null;
+  severity: "High" | "Medium" | "Low";
+  time: string;
 }
 
 interface StatusData {
   fastapi_active: boolean;
   modules_loaded: number;
   concurrent_tasks_active: number;
-  recent_tasks: Task[];
   total_reports: number;
   total_sessions: number;
   recent_reports: Report[];
 }
+
+const SEVERITY_COLOR: Record<string, { bg: string; text: string; dot: string }> = {
+  High:   { bg: "#FEF2F2", text: "#B07068", dot: "#EF4444" },
+  Medium: { bg: "#F1EFE8", text: "#5F5E5A", dot: "#888780" },
+  Low:    { bg: "#F0FDF4", text: "#80A888", dot: "#10B981" },
+};
+
+function detectReportIcon(issue: string, location: string) {
+  const s = `${issue} ${location}`.toLowerCase();
+  if (/fire|hotspot|kebakaran|thermal/i.test(s)) return { icon: Flame, bg: "#F0ECE8", color: "#6B4A3A", label: "fire" };
+  if (/vegetasi|geo|ndvi|satelit|deforestasi|hutan|mangrove|pohon/i.test(s)) return { icon: Leaf, bg: "#E8EDE8", color: "#4A5E4A", label: "vegetation" };
+  if (/cuaca|weather|iklim|suhu|hujan|angin|kelembaban/i.test(s)) return { icon: Cloud, bg: "#E8ECF0", color: "#4A5670", label: "weather" };
+  return { icon: Globe, bg: "#EEEDF0", color: "#5A4A6B", label: "osint" };
+}
+
+const AGENT_ROSTER = [
+  { id: "geo_agent",      name: "geo_agent",      role: "Satellite & Spatial",  color: "#4A5E4A", bg: "#E8EDE8", icon: Leaf },
+  { id: "water_agent",    name: "water_agent",    role: "Water Quality Sensor", color: "#4A5670", bg: "#E8ECF0", icon: Cloud },
+  { id: "fire_agent",     name: "fire_agent",     role: "Thermal & Hotspot",    color: "#6B4A3A", bg: "#F0ECE8", icon: Flame },
+  { id: "osint_agent",    name: "osint_agent",    role: "Media & Web Intel",    color: "#5A4A6B", bg: "#EEEDF0", icon: Globe },
+];
+
+const SUGGESTIONS = [
+  "Audit vegetasi Kintamani",
+  "Cek hotspot kebakaran Buleleng",
+  "Analisis kualitas udara Denpasar",
+  "Monitoring mangrove Tahura",
+];
 
 export default function MonitorPage() {
   const router = useRouter();
@@ -48,368 +64,360 @@ export default function MonitorPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [chatPrompt, setChatPrompt] = useState("");
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://10.10.20.254:8000";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
 
-  // Fetch status metrics
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`${backendUrl}/api/status`);
-      if (!res.ok) throw new Error("Failed to fetch status");
+      if (!res.ok) throw new Error("fetch failed");
       const json = await res.json();
       setData(json);
       setError(false);
-    } catch (err) {
-      console.error("[Monitor] Fetch status error:", err);
+    } catch {
       setError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [backendUrl]);
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
+    const interval = setInterval(fetchStatus, 8000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchStatus]);
 
   const handleQuickChatSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatPrompt.trim()) return;
-    // Redirect to dashboard with prompt query
     router.push(`/dashboard?prompt=${encodeURIComponent(chatPrompt.trim())}`);
   };
 
-  // Mock locations for fallback when report database is empty (so the page looks outstanding!)
-  const sampleReports = [
-    { id: 101, location: "Kintamani", issue_type: "Deforestasi Hutan Lindung", severity: "High", time: "1 jam yang lalu" },
-    { id: 102, location: "Sungai Ayung", issue_type: "Pencemaran Limbah Domestik", severity: "Medium", time: "4 jam yang lalu" },
-    { id: 103, location: "Sanur", issue_type: "Sampah Plastik Pesisir", severity: "Low", time: "1 hari yang lalu" },
-    { id: 104, location: "Ubud", issue_type: "Alih Fungsi Lahan Pertanian", severity: "Medium", time: "2 hari yang lalu" },
-  ];
+  const container = {
+    hidden: { opacity: 0 },
+    show: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.05 } },
+  };
+  const item = {
+    hidden: { opacity: 0, y: 12 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number] } },
+  };
 
   return (
     <>
       <NavBar />
-      <div className="noise-overlay" />
-      
-      <main className="flex-1 max-w-7xl mx-auto px-8 w-full py-12 select-none">
-        
-        {/* Header Section */}
-        <section className="mb-16 border-b border-[var(--pemali-border)] pb-12 flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
-          <div className="max-w-2xl">
-            <div className="inline-flex items-center space-x-2 bg-stone-200/50 px-3 py-1 rounded-full border border-stone-300/40 mb-4 font-mono text-[10px] uppercase tracking-wider text-stone-600">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
-              </span>
-              <span>Spatial Intelligence Network</span>
-            </div>
-            <h1 className="font-serif text-4xl md:text-5xl font-semibold tracking-tight text-[var(--pemali-text-primary)]">
-              Ruang Pemantauan <span className="italic text-stone-500">Ekologi Bali</span>
+      <main
+        className="min-h-screen"
+        style={{ backgroundColor: "var(--color-background-tertiary, #F0EFEA)" }}
+      >
+        <div className="max-w-7xl mx-auto px-6 lg:px-8 py-10">
+          {/* Header */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number] }}
+            className="mb-8"
+          >
+            <h1 className="text-[14px] font-medium text-[var(--pemali-text-primary)]">
+              Monitor
             </h1>
-            <p className="text-stone-600 font-light mt-3 leading-relaxed">
-              Memonitor data kognisi agent, alur kerja otonom, deteksi spasial satelit, dan total laporan kerusakan lingkungan Bali secara langsung berdasarkan asas Pawongan dan Palemahan.
+            <p className="text-[12px] text-[var(--pemali-text-secondary)] mt-1">
+              Real-time status sistem dan log audit lingkungan Bali
             </p>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            <Link 
-              href="/dashboard"
-              className="bg-stone-900 text-white hover:bg-black px-6 py-3 rounded-full text-xs font-medium transition-all shadow-md flex items-center gap-2 group"
-            >
-              Masuk Ruang Kendali
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-            </Link>
-          </div>
-        </section>
+          </motion.div>
 
-        {/* Status Indicators Grid */}
-        <section className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-          {/* Card 1: Total Reports */}
-          <div className="bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded-xl p-6 relative overflow-hidden transition-all hover:scale-[1.01]">
-            <div className="absolute top-4 right-4 text-stone-400/30">
-              <Database className="w-12 h-12" />
-            </div>
-            <div className="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-1">
-              Verified Audit Reports
-            </div>
-            <div className="text-4xl font-serif font-bold text-[var(--pemali-text-primary)] mb-2">
-              {loading ? (
-                <span className="animate-pulse">...</span>
-              ) : data ? (
-                data.total_reports || sampleReports.length
-              ) : (
-                sampleReports.length
-              )}
-            </div>
-            <p className="text-[11px] text-stone-500 leading-normal">
-              Laporan terverifikasi oleh Agen Spasial & OSINT otonom.
-            </p>
-          </div>
+          {/* Grid 2 kolom */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
 
-          {/* Card 2: Active Sessions */}
-          <div className="bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded-xl p-6 relative overflow-hidden transition-all hover:scale-[1.01]">
-            <div className="absolute top-4 right-4 text-stone-400/30">
-              <MessageSquare className="w-12 h-12" />
-            </div>
-            <div className="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-1">
-              Active Sessions
-            </div>
-            <div className="text-4xl font-serif font-bold text-[var(--pemali-text-primary)] mb-2">
-              {loading ? (
-                <span className="animate-pulse">...</span>
-              ) : data ? (
-                data.total_sessions || 0
-              ) : (
-                19
-              )}
-            </div>
-            <p className="text-[11px] text-stone-500 leading-normal">
-              Sesi interaksi penilai lingkungan di sistem PEMALI.
-            </p>
-          </div>
+            {/* ── KIRI: 3/5 ── */}
+            <div className="lg:col-span-3 flex flex-col gap-5">
 
-          {/* Card 3: Loaded Modules */}
-          <div className="bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded-xl p-6 relative overflow-hidden transition-all hover:scale-[1.01]">
-            <div className="absolute top-4 right-4 text-stone-400/30">
-              <Cpu className="w-12 h-12" />
-            </div>
-            <div className="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-1">
-              Spatial Sensors
-            </div>
-            <div className="text-4xl font-serif font-bold text-[var(--pemali-text-primary)] mb-2">
-              {loading ? (
-                <span className="animate-pulse">...</span>
-              ) : data ? (
-                data.modules_loaded || 0
-              ) : (
-                7
-              )}
-            </div>
-            <p className="text-[11px] text-stone-500 leading-normal">
-              Modul analisis spasial & UTI V2 aktif dalam registry.
-            </p>
-          </div>
-
-          {/* Card 4: System Heartbeat */}
-          <div className="bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded-xl p-6 relative overflow-hidden transition-all hover:scale-[1.01]">
-            <div className="absolute top-4 right-4 text-stone-400/30">
-              <Activity className="w-12 h-12" />
-            </div>
-            <div className="text-[10px] font-mono text-stone-500 uppercase tracking-widest mb-1">
-              Node Connection
-            </div>
-            <div className="flex items-center gap-2 mb-2 mt-1">
-              <span className="relative flex h-3 w-3">
-                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${error ? 'bg-red-400' : 'bg-green-400'}`}></span>
-                <span className={`relative inline-flex rounded-full h-3 w-3 ${error ? 'bg-red-500' : 'bg-green-500'}`}></span>
-              </span>
-              <div className="text-lg font-mono font-medium text-[var(--pemali-text-primary)]">
-                {error ? "Offline" : "Operational"}
-              </div>
-            </div>
-            <p className="text-[11px] text-stone-500 leading-normal">
-              Koneksi inti ke worker.py dan database lancar.
-            </p>
-          </div>
-        </section>
-
-        {/* Main Columns */}
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-16">
-          
-          {/* Left Column: Quick Action & Live Heartbeat (8 cols) */}
-          <div className="lg:col-span-8 flex flex-col gap-8">
-            
-            {/* Quick Trigger Chat Box */}
-            <div className="bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded-xl p-8 shadow-sm">
-              <h3 className="font-serif text-xl font-semibold mb-2">
-                Inisiasi Geo-Audit Cepat
-              </h3>
-              <p className="text-stone-600 text-xs font-light mb-6">
-                Ingin menyelidiki lokasi atau isu lingkungan tertentu secara otonom? Masukkan lokasi atau ketik perintah di bawah untuk langsung mendelegasikan tugas ke sub-agen kami.
-              </p>
-              
-              <form onSubmit={handleQuickChatSubmit} className="relative">
-                <div className="flex items-center bg-stone-100/60 border border-stone-300/60 focus-within:border-[var(--pemali-accent)] rounded-2xl p-2 transition-all duration-300">
-                  <div className="pl-3 pr-2 text-stone-400">
-                    <Search className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="text"
-                    value={chatPrompt}
-                    onChange={(e) => setChatPrompt(e.target.value)}
-                    placeholder="Audit kualitas air Sungai Ayung Bali..."
-                    className="w-full bg-transparent text-stone-800 placeholder-stone-400 text-xs outline-none py-2"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!chatPrompt.trim()}
-                    className="bg-stone-900 text-white disabled:opacity-30 hover:bg-black px-5 py-2.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 shrink-0"
-                  >
-                    Mulai Audit
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-              </form>
-              
-              <div className="mt-4 flex flex-wrap gap-2 items-center">
-                <span className="text-[10px] text-stone-400 font-mono">Contoh:</span>
+              {/* ═══ STATS ROW ═══ */}
+              <motion.div variants={container} initial="hidden" animate="show" className="grid grid-cols-3 gap-4">
                 {[
-                  "Audit vegetasi Ubud",
-                  "Cek hotspot kebakaran hutan Kintamani",
-                  "Analisis sampah plastik Pantai Sanur"
+                  { label: "Total Reports", value: data?.total_reports ?? 0, icon: Database },
+                  { label: "Active Sessions", value: data?.total_sessions ?? 0, icon: Activity },
+                  { label: "Modules", value: data?.modules_loaded ?? 0, icon: Cpu },
                 ].map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setChatPrompt(s)}
-                    className="text-[10px] text-stone-500 hover:text-stone-900 border border-stone-200 hover:border-stone-400 bg-white/40 px-2.5 py-1 rounded-lg transition-all"
+                  <motion.div
+                    key={s.label}
+                    variants={item}
+                    className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
                   >
-                    {s}
-                  </button>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[11px] text-[var(--pemali-text-muted)] uppercase tracking-[0.08em] font-medium">
+                        {s.label}
+                      </span>
+                      <s.icon size={15} className="text-[#B4B2A9]" strokeWidth={1.5} />
+                    </div>
+                    <div className="text-[26px] font-medium text-[var(--pemali-text-primary)] tracking-tight">
+                      {loading ? <span className="text-[var(--pemali-text-muted)]">...</span> : s.value}
+                    </div>
+                  </motion.div>
                 ))}
-              </div>
-            </div>
+              </motion.div>
 
-            {/* Recent Audit Reports Log */}
-            <div className="bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded-xl p-8 shadow-sm">
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <h3 className="font-serif text-xl font-semibold">
-                    Log Pelanggaran Alam
-                  </h3>
-                  <p className="text-stone-500 text-xs font-light mt-0.5">
-                    Kasus kerusakan lingkungan yang ditemukan oleh kognisi AI.
-                  </p>
+              {/* ═══ INPUT AUDIT ═══ */}
+              <motion.div
+                variants={item} initial="hidden" animate="show"
+                className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
+              >
+                <div className="text-[11px] text-[var(--pemali-text-muted)] uppercase tracking-[0.08em] font-medium mb-4">
+                  Inisiasi Audit
                 </div>
-                <div className="text-[9px] font-mono uppercase bg-stone-200/50 text-stone-600 px-2 py-0.5 rounded border border-stone-300/30">
-                  Live Feed
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-4">
-                {/* Check if we have recent_reports from backend or fallback */}
-                {loading ? (
-                  <div className="text-xs text-stone-400 font-mono py-4 text-center animate-pulse">
-                    Memuat data audit ekologi...
+                <form onSubmit={handleQuickChatSubmit}>
+                  <div className="flex items-center gap-2 bg-[var(--pemali-bg)] border border-[var(--pemali-border)] rounded-xl px-4 py-[10px] focus-within:border-[var(--pemali-accent)]/50 transition-colors">
+                    <Search size={15} className="text-[var(--pemali-text-muted)] shrink-0" strokeWidth={1.5} />
+                    <input
+                      type="text"
+                      value={chatPrompt}
+                      onChange={(e) => setChatPrompt(e.target.value)}
+                      placeholder="Contoh: Audit degradasi vegetasi di Kintamani..."
+                      className="w-full bg-transparent text-[13px] text-[var(--pemali-text-primary)] placeholder:italic placeholder:text-[var(--pemali-text-muted)] outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!chatPrompt.trim()}
+                      className="bg-[var(--pemali-text-primary)] text-white disabled:opacity-30 hover:opacity-90 px-5 py-2 rounded-lg text-[11px] font-medium transition-opacity shrink-0 flex items-center gap-1.5"
+                    >
+                      <span>Kirim</span>
+                      <ArrowRight size={13} strokeWidth={2} />
+                    </button>
                   </div>
-                ) : (
-                  (data?.recent_reports && data.recent_reports.length > 0
-                    ? data.recent_reports
-                    : sampleReports
-                  ).map((report, idx) => {
-                    // Determine Severity styling
-                    const severity = 'severity' in report ? (report as any).severity : "Medium";
-                    const isHigh = severity === "High";
-                    const isLow = severity === "Low";
-                    
-                    return (
-                      <div 
-                        key={report.id || idx}
-                        className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 border border-[var(--pemali-border)] rounded-2xl bg-white/40 hover:bg-white/70 transition-all gap-4"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="w-8 h-8 rounded-xl bg-stone-100 flex items-center justify-center border border-stone-200 shrink-0 mt-0.5">
-                            <MapPin className="w-3.5 h-3.5 text-stone-600" />
+                </form>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setChatPrompt(s)}
+                      className="text-[11px] text-[var(--pemali-text-secondary)] border border-[var(--pemali-border)] bg-white hover:bg-[var(--pemali-bg)] px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+
+              {/* ═══ LOG AUDIT ═══ */}
+              <motion.div
+                variants={item} initial="hidden" animate="show"
+                className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
+              >
+                <div className="flex items-center justify-between mb-5">
+                  <div className="text-[11px] text-[var(--pemali-text-muted)] uppercase tracking-[0.08em] font-medium">
+                    Log Pelanggaran Alam
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-[var(--pemali-text-muted)]">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ backgroundColor: "#1D9E75" }} />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: "#1D9E75", opacity: 0.7 }} />
+                    </span>
+                    Live Feed
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  {loading ? (
+                    <div className="text-[12px] text-[var(--pemali-text-muted)] py-10 text-center">
+                      Memuat data...
+                    </div>
+                  ) : data?.recent_reports && data.recent_reports.length > 0 ? (
+                    data.recent_reports.map((report, idx) => {
+                      const sev = SEVERITY_COLOR[report.severity] || SEVERITY_COLOR.Low;
+                      const meta = detectReportIcon(report.issue_type, report.location);
+                      const Icon = meta.icon;
+                      return (
+                        <motion.div
+                          key={report.id || idx}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3, delay: idx * 0.03 }}
+                          className="flex items-start gap-3 p-4 border border-[var(--pemali-border)] rounded-xl hover:bg-[var(--pemali-bg)]/40 transition-colors"
+                        >
+                          {/* Icon semantic */}
+                          <div
+                            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                            style={{ backgroundColor: meta.bg }}
+                          >
+                            <Icon size={16} style={{ color: meta.color }} strokeWidth={1.5} />
                           </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-serif text-sm font-semibold text-stone-900">{report.location}</span>
-                              <span className="text-[10px] font-mono text-stone-400">ID #{report.id}</span>
+
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-[13px] font-medium text-[var(--pemali-text-primary)] truncate">
+                                {report.location}
+                              </span>
+                              <span className="text-[10px] font-mono text-[var(--pemali-text-muted)] shrink-0">
+                                #{report.id}
+                              </span>
                             </div>
-                            <span className="text-xs text-stone-600 font-light block mt-0.5">
+                            <p className="text-[11px] text-[var(--pemali-text-secondary)] mt-0.5 truncate">
                               {report.issue_type}
+                            </p>
+                          </div>
+
+                          {/* Severity + Time */}
+                          <div className="flex flex-col items-end gap-1.5 shrink-0">
+                            <div
+                              className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider"
+                              style={{
+                                backgroundColor: sev.bg,
+                                color: sev.text,
+                                border: report.severity === "Medium" ? "0.5px solid #D3D1C7" : "none",
+                              }}
+                            >
+                              <span
+                                className="w-1.5 h-1.5 rounded-full"
+                                style={{ backgroundColor: sev.dot }}
+                              />
+                              {report.severity}
+                            </div>
+                            <span className="text-[10px] text-[var(--pemali-text-muted)] font-mono">
+                              {report.time}
                             </span>
                           </div>
-                        </div>
+                        </motion.div>
+                      );
+                    })
+                  ) : error ? (
+                    <div className="text-[12px] text-[var(--state-error)] py-10 text-center border border-dashed border-[var(--pemali-border)] rounded-xl">
+                      Gagal terhubung ke backend.
+                    </div>
+                  ) : (
+                    <div className="text-[12px] text-[var(--pemali-text-muted)] py-10 text-center border border-dashed border-[var(--pemali-border)] rounded-xl">
+                      Belum ada laporan audit.
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            </div>
 
-                        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end shrink-0">
-                          <span className={`px-2.5 py-1 rounded-full text-[9px] font-mono uppercase tracking-wider ${
-                            isHigh ? 'bg-red-50 text-red-700 border border-red-200/50' : 
-                            isLow ? 'bg-green-50 text-green-700 border border-green-200/50' : 
-                            'bg-amber-50 text-amber-700 border border-amber-200/50'
-                          }`}>
-                            {severity} Priority
-                          </span>
-                          <span className="text-[10px] text-stone-400 font-mono shrink-0">
-                            {'time' in report ? (report as any).time : "Baru saja"}
-                          </span>
+            {/* ── KANAN: 2/5 ── */}
+            <div className="lg:col-span-2 flex flex-col gap-5">
+
+              {/* ═══ SUB-AGENT ROSTER ═══ */}
+              <motion.div
+                variants={item} initial="hidden" animate="show"
+                className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
+              >
+                <div className="text-[11px] text-[var(--pemali-text-muted)] uppercase tracking-[0.08em] font-medium mb-4">
+                  Sub-Agent Roster
+                </div>
+                <div className="flex flex-col gap-3">
+                  {AGENT_ROSTER.map((agent, i) => (
+                    <motion.div
+                      key={agent.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, delay: 0.05 + i * 0.04 }}
+                      className="flex items-center gap-3 p-3 border border-[var(--pemali-border)] rounded-xl"
+                    >
+                      <div
+                        className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: agent.bg }}
+                      >
+                        <agent.icon size={16} style={{ color: agent.color }} strokeWidth={1.5} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12px] font-mono font-medium text-[var(--pemali-text-primary)]">
+                          {agent.name}
+                        </div>
+                        <div className="text-[10px] text-[var(--pemali-text-secondary)] mt-0.5">
+                          {agent.role}
                         </div>
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-          </div>
-
-          {/* Right Column: System Terminal (4 cols) */}
-          <div className="lg:col-span-4 flex flex-col gap-6">
-            
-            {/* Tri Hita Karana Rules */}
-            <div className="bg-stone-900 text-stone-100 rounded-xl p-6 relative overflow-hidden" style={{ borderColor: "rgba(255,252,245,0.06)" }}>
-              <div className="absolute -right-4 -bottom-4 text-stone-800 opacity-20 pointer-events-none">
-                <Globe className="w-32 h-32" />
-              </div>
-              <h4 className="font-serif text-sm text-[var(--pemali-accent)] font-semibold mb-4 uppercase tracking-widest">
-                Tri Hita Karana Philosophy
-              </h4>
-              
-              <div className="flex flex-col gap-4 relative z-10">
-                <div>
-                  <div className="text-[10px] font-mono text-stone-400 uppercase">01 · Parahyangan</div>
-                  <p className="text-xs font-light text-stone-300 mt-1 leading-relaxed">
-                    Spiritual audit balance. Keselarasan kognisi AI dengan kearifan adat Bali dalam menjaga kesucian alam.
-                  </p>
+                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#F5F4EF] border border-[var(--pemali-border)]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--pemali-text-muted)]" />
+                        <span className="text-[9px] font-mono text-[var(--pemali-text-muted)] uppercase tracking-wider">
+                          Standby
+                        </span>
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
-                <div className="border-t border-stone-800 my-1" />
-                <div>
-                  <div className="text-[10px] font-mono text-stone-400 uppercase">02 · Pawongan</div>
-                  <p className="text-xs font-light text-stone-300 mt-1 leading-relaxed">
-                    Social collaboration. Transparansi data audit agar masyarakat dapat saling mengawasi kelestarian desa adat.
-                  </p>
-                </div>
-                <div className="border-t border-stone-800 my-1" />
-                <div>
-                  <div className="text-[10px] font-mono text-stone-400 uppercase">03 · Palemahan</div>
-                  <p className="text-xs font-light text-stone-300 mt-1 leading-relaxed">
-                    Environmental connection. Misi utama sensor otonom PEMALI dalam mendeteksi dan menanggulangi kerusakan alam Bali.
-                  </p>
-                </div>
-              </div>
-            </div>
+              </motion.div>
 
-            {/* Active Sub-agents state panel */}
-            <div className="bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded-xl p-6">
-              <h3 className="font-serif text-base font-semibold mb-4">
-                Sub-Agent Roster
-              </h3>
-              
-              <div className="flex flex-col gap-3.5">
-                {[
-                  { name: "osint_agent", role: "Media & Web Intelligence", state: "AWAITING" },
-                  { name: "geo_agent", role: "Satellite & Spasial Analisis", state: "AWAITING" },
-                  { name: "water_agent", role: "Water Quality Sensor", state: "AWAITING" },
-                  { name: "fire_agent", role: "Thermal & Heatmap Scanner", state: "AWAITING" },
-                ].map((agent) => (
-                  <div key={agent.name} className="flex justify-between items-center p-3 border border-stone-200/50 rounded-xl bg-white/20">
-                    <div>
-                      <div className="text-xs font-mono font-medium text-stone-900">{agent.name}</div>
-                      <div className="text-[10px] text-stone-500 font-light mt-0.5">{agent.role}</div>
+              {/* ═══ TRI HITA KARANA ═══ */}
+              <motion.div
+                variants={item} initial="hidden" animate="show"
+                className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
+              >
+                <div className="text-[11px] tracking-[0.1em] uppercase font-medium mb-5" style={{ color: "#888780" }}>
+                  Tri Hita Karana
+                </div>
+                <div className="flex flex-col gap-5">
+                  {[
+                    {
+                      num: "01",
+                      title: "Parahyangan",
+                      desc: "Keseimbangan spiritual. Audit kognitif AI didesain menghormati nilai kearifan desa adat dan kesucian alam Bali.",
+                    },
+                    {
+                      num: "02",
+                      title: "Pawongan",
+                      desc: "Kolaborasi sosial. Keterbukaan data anomali dan log otonom yang dapat diakses oleh masyarakat desa adat.",
+                    },
+                    {
+                      num: "03",
+                      title: "Palemahan",
+                      desc: "Harmoni lingkungan. Pemantauan sensor ekologis asinkron dalam menanggulangi ancaman kerusakan fisik alam.",
+                    },
+                  ].map((thk) => (
+                    <div
+                      key={thk.num}
+                      className="pl-3"
+                      style={{
+                        borderLeft: "2px solid #5B8DEF",
+                      }}
+                    >
+                      <div className="text-[10px] font-mono tracking-wider mb-1" style={{ color: "#B4B2A9" }}>
+                        {thk.num}
+                      </div>
+                      <div className="text-[13px] font-medium text-[var(--pemali-text-primary)] mb-1">
+                        {thk.title}
+                      </div>
+                      <p className="text-[11px] text-[var(--pemali-text-secondary)] leading-relaxed">
+                        {thk.desc}
+                      </p>
                     </div>
-                    <span className="px-2 py-0.5 rounded text-[8px] font-mono uppercase bg-stone-100 text-stone-500 border border-stone-200">
-                      {agent.state}
-                    </span>
+                  ))}
+                </div>
+              </motion.div>
+
+              {/* ═══ HEARTBEAT ═══ */}
+              <motion.div
+                variants={item} initial="hidden" animate="show"
+                className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[11px] text-[var(--pemali-text-muted)] uppercase tracking-[0.08em] font-medium mb-1">
+                      System
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2 w-2">
+                        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${error ? "bg-red-400" : "bg-green-400"}`} />
+                        <span className={`relative inline-flex rounded-full h-2 w-2 ${error ? "bg-red-500" : "bg-green-500"}`} />
+                      </span>
+                      <span className="text-[13px] font-medium text-[var(--pemali-text-primary)]">
+                        {error ? "Disconnected" : "Operational"}
+                      </span>
+                    </div>
                   </div>
-                ))}
-              </div>
+                  <div className="flex items-center gap-1.5 text-[11px] text-[var(--pemali-text-muted)] font-mono">
+                    <Clock size={13} strokeWidth={1.5} />
+                    <span>8s poll</span>
+                  </div>
+                </div>
+                <div className="mt-3 text-[11px] text-[var(--pemali-text-secondary)]">
+                  {data?.fastapi_active
+                    ? `FastAPI aktif · ${data.modules_loaded} module terdaftar`
+                    : "Menunggu koneksi backend..."}
+                </div>
+              </motion.div>
             </div>
-
           </div>
-
-        </section>
-
+        </div>
       </main>
       <Footer />
     </>

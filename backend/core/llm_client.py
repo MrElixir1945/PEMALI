@@ -1,9 +1,6 @@
 import os
 import logging
 from openai import AsyncOpenAI
-from dotenv import load_dotenv
-
-load_dotenv("config/.env")
 
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")

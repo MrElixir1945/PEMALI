@@ -16,10 +16,6 @@ from backend.core.models import MasterPlan, TaskIntent, TelemetryEvent, NodeStat
 from backend.core.telemetry import telemetry
 from backend.core.registry import registry
 from backend.core.llm_client import get_llm_client
-from backend.core.session_logger import SessionLogger
-from dotenv import load_dotenv
-
-load_dotenv("config/.env")
 
 logger = logging.getLogger("PEMALI.Orchestrator")
 
@@ -160,6 +156,18 @@ async def execute_subagent_with_safety(sub_agent: "SubAgent", trace_id: str, tim
         ).model_dump()
 
 
+_IMAGE_URL_RE = re.compile(r'(https?://[^\s"\']+\.(?:png|jpg|jpeg|gif|webp|svg))', re.IGNORECASE)
+
+def _strip_image_urls(data: dict | list | str) -> dict | list | str:
+    if isinstance(data, dict):
+        return {k: _strip_image_urls(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_strip_image_urls(v) for v in data]
+    if isinstance(data, str) and _IMAGE_URL_RE.search(data):
+        return _IMAGE_URL_RE.sub('[image]', data)
+    return data
+
+
 class SubAgent:
     def __init__(self, task: TaskIntent, session_id: str, tools: List[Dict], trace_id: str):
         self.task = task
@@ -170,13 +178,36 @@ class SubAgent:
         self.max_retries = 3
 
     async def _call_llm_streaming(self, messages: List[Dict]) -> Dict:
-        """Stream LLM response via openai SDK. Push tokens to stream_queue contextvar."""
+        """Stream LLM response via openai SDK. Push tokens to stream_queue + telemetry."""
         stream_queue = stream_queue_var.get()
         logger.debug(f"[SubAgent._call_llm_streaming] stream_queue={stream_queue is not None}, node_id={self.task.target_agent}")
         llm = get_llm_client()
 
         full_content = ""
         tool_call_accum: Dict[int, Dict] = {}
+
+        # Token buffer: flush every 5 tokens or 200ms to reduce SSE overhead
+        token_buffer: list[str] = []
+        BUFFER_FLUSH_SIZE = 5
+        last_flush = time.monotonic()
+        BUFFER_FLUSH_INTERVAL = 0.2
+
+        async def flush_token_buffer(phase: str = "reasoning"):
+            nonlocal token_buffer, last_flush
+            if not token_buffer:
+                return
+            batch = "".join(token_buffer)
+            token_buffer = []
+            last_flush = time.monotonic()
+            await telemetry.emit_dict({
+                "type": "agent_thinking",
+                "agent_id": self.task.target_agent,
+                "agent_name": self.task.target_agent.replace("_agent", "").replace("_", " ").title(),
+                "chunk": batch,
+                "phase": phase,
+                "trace_id": self.trace_id,
+                "timestamp": int(time.time())
+            })
 
         stream = await llm.chat.completions.create(
             model=OPENROUTER_MODEL,
@@ -194,13 +225,18 @@ class SubAgent:
 
             if delta.content:
                 full_content += delta.content
+                # Push to direct stream queue (for POST /api/stream consumers)
                 if stream_queue is not None:
                     await stream_queue.put({
                         "_sse_event": "token",
                         "node_id": self.task.target_agent,
                         "content": delta.content
                     })
-                    logger.debug(f"[SubAgent] Token pushed: {len(delta.content)} chars")
+                # Buffer for telemetry broadcast (for /api/telemetry consumers)
+                token_buffer.append(delta.content)
+                if len(token_buffer) >= BUFFER_FLUSH_SIZE or \
+                   (time.monotonic() - last_flush) >= BUFFER_FLUSH_INTERVAL:
+                    await flush_token_buffer("reasoning")
 
             if delta.tool_calls:
                 for tc in delta.tool_calls:
@@ -215,6 +251,9 @@ class SubAgent:
                     fn = tc.function
                     if fn and fn.name: acc['function']['name'] += fn.name
                     if fn and fn.arguments: acc['function']['arguments'] += fn.arguments
+
+        # Flush remaining tokens
+        await flush_token_buffer("reasoning")
 
         result = {"content": full_content}
         if tool_call_accum:
@@ -234,15 +273,27 @@ class SubAgent:
 
             "# ATURAN EKSEKUSI (prioritas #1)\n"
             "1. Analisa task — pahami intent user\n"
-            "2. Narasikan pendekatanmu dalam 1-2 kalimat bahasa Indonesia natural\n"
-            "3. Panggil tool yang relevan dari daftar # TOOLS — sistem akan otomatis eksekusi\n"
-            "4. Setelah hasil tool masuk, interpretasikan data dalam narasi ringkas\n\n"
+            "2. **WAJIB**: Tulis narrative dulu (2-4 kalimat) menjelaskan apa yang kamu pikirkan, "
+            "mengapa tool ini relevan, dan apa yang kamu harapkan. JANGAN PERNAH SKIP LANGKAH INI.\n"
+            "3. Setelah narrative, panggil tool yang relevan dari daftar # TOOLS.\n"
+            "4. Setelah hasil tool masuk, interpretasikan data dalam narasi ringkas.\n\n"
 
-            "# ATURAN NARASI\n"
-            "Narasi harus natural, bukan JSON mentah.\n"
-            "Ceritakan apa yang KAMU LAKUKAN dan TEMUAN yang didapat.\n"
-            "JANGAN output JSON — JSON hanya untuk function calling, bukan untuk narasi.\n"
+            "# ATURAN NARASI (WAJIB DIBACA)\n"
+            "Kamu HARUS menulis narrative thinking SEBELUM memanggil tool apapun.\n"
+            "Narrative adalah cerita proses berpikirmu — bukan JSON, bukan data mentah.\n"
+            "Format: tulis narrative natural dulu, BARU gunakan function calling untuk tool.\n"
+            "JANGAN PERNAH memanggil tool tanpa narrative terlebih dahulu.\n"
             "Narasi dalam bahasa Indonesia natural, ringkas, informatif.\n\n"
+
+            "# ATURAN RESPONSE\n"
+            "KAMU WAJIB MENGIRIMKAN NARRATIVE + TOOL CALL DALAM SATU RESPONSE.\n"
+            "Contoh yang BENAR:\n"
+            "  <narrative>Saya akan memeriksa data suhu permukaan....</narrative>\n"
+            "  <tool_call>weather_hazard_monitor(location=\"...\")</tool_call>\n\n"
+
+            "Contoh yang SALAH (JANGAN DITIRU):\n"
+            "  <tool_call>weather_hazard_monitor(location=\"...\")</tool_call>  "
+            "(TANPA NARRATIVE — INI DILARANG!)\n\n"
 
             "# ATURAN KOREKSI DIRI\n"
             "Jika tool gagal (status 4xx/5xx), baca pesan error, sesuaikan parameter, dan coba lagi.\n"
@@ -264,6 +315,18 @@ class SubAgent:
 
             try:
                 stream_queue = stream_queue_var.get()
+
+                # Emit reasoning_start so frontend shows agent is active
+                await telemetry.emit_dict({
+                    "type": "agent_thinking",
+                    "agent_id": self.task.target_agent,
+                    "agent_name": self.task.target_agent.replace("_agent", "").replace("_", " ").title(),
+                    "chunk": "",
+                    "phase": "reasoning",
+                    "trace_id": self.trace_id,
+                    "timestamp": int(time.time())
+                })
+
                 if stream_queue is not None:
                     logger.info(f"[SubAgent] Streaming LLM (attempt {attempt+1}/{self.max_retries})")
                     ai_msg = await self._call_llm_streaming(messages)
@@ -292,8 +355,47 @@ class SubAgent:
                             }
                             for tc in ai_msg_raw.tool_calls
                         ]
+                    # For non-streaming, emit full content as single chunk
+                    if ai_msg.get("content"):
+                        await telemetry.emit_dict({
+                            "type": "agent_thinking",
+                            "agent_id": self.task.target_agent,
+                            "agent_name": self.task.target_agent.replace("_agent", "").replace("_", " ").title(),
+                            "chunk": ai_msg["content"],
+                            "phase": "reasoning",
+                            "trace_id": self.trace_id,
+                            "timestamp": int(time.time())
+                        })
 
                 llm_narrative = ai_msg.get("content") or ""
+
+                # Fallback: if LLM sent tool calls without narrative, generate auto-narrative
+                if not llm_narrative and ai_msg.get("tool_calls"):
+                    tool_names = [tc["function"]["name"] for tc in ai_msg["tool_calls"]]
+                    llm_narrative = (
+                        f"Menganalisis data menggunakan {', '.join(tool_names)} untuk "
+                        f"mengevaluasi kondisi lingkungan di area target sesuai instruksi: "
+                        f"{self.task.intent}"
+                    )
+                    # Emit fallback to global telemetry subscribers
+                    await telemetry.emit_dict({
+                        "type": "agent_thinking",
+                        "agent_id": self.task.target_agent,
+                        "agent_name": self.task.target_agent.replace("_agent", "").replace("_", " ").title(),
+                        "chunk": llm_narrative,
+                        "phase": "reasoning",
+                        "trace_id": self.trace_id,
+                        "timestamp": int(time.time())
+                    })
+                    # Also push to direct stream queue if available
+                    stream_q = stream_queue_var.get()
+                    if stream_q is not None:
+                        await stream_q.put({
+                            "_sse_event": "token",
+                            "node_id": self.task.target_agent,
+                            "content": llm_narrative
+                        })
+
                 logger.critical(f"[SubAgent] === LLM RESPONSE [{self.task.target_agent}] ===")
                 logger.critical(f"[SubAgent] Narrative: {llm_narrative[:500]}")
                 if ai_msg.get("tool_calls"):
@@ -318,6 +420,17 @@ class SubAgent:
                         trace_id=self.trace_id, node_id=self.task.target_agent, node_type="SubAgent",
                         state=NodeState.EXECUTING, narrative=f"Menjalankan: {', '.join(tool_names)}"
                     ))
+                    # Emit phase transition for frontend thinking stream
+                    await telemetry.emit_dict({
+                        "type": "agent_thinking",
+                        "agent_id": self.task.target_agent,
+                        "agent_name": self.task.target_agent.replace("_agent", "").replace("_", " ").title(),
+                        "chunk": "",
+                        "phase": "tool_call",
+                        "tool_names": tool_names,
+                        "trace_id": self.trace_id,
+                        "timestamp": int(time.time())
+                    })
 
                     tasks = []
                     json_errors = []
@@ -351,11 +464,12 @@ class SubAgent:
                     final_results = []
 
                     for res_data in results:
+                        sanitized = _strip_image_urls(res_data["output"])
                         messages.append({
                             "role": "tool",
                             "tool_call_id": res_data["tool_call_id"],
                             "name": res_data["tool_name"],
-                            "content": json.dumps(res_data["output"])
+                            "content": json.dumps(sanitized)
                         })
 
                         output_payload = res_data["output"].copy()
@@ -685,7 +799,8 @@ class PemaliOrchestrator:
             logger.warning(f"[Manager] RAG query failed (continuing without): {e}")
             past_memories = []
             graph_context = ""
-        rag_context = "\n".join([f"- {m['content']}" for m in past_memories]) if past_memories else ""
+        rag_context = _strip_image_urls("\n".join([f"- {m['content']}" for m in past_memories])) if past_memories else ""
+        graph_context = _strip_image_urls(graph_context) if graph_context else ""
         logger.debug(f"[Manager] RAG context: {len(past_memories)} memories, graph_context={bool(graph_context)}")
 
         rag_part = f"\n# KONTEKS HISTORIS (ChromaDB)\n{rag_context}\n" if rag_context else ""
@@ -995,7 +1110,7 @@ class PemaliOrchestrator:
                     filtered_res = {}
                     for r in res.get("results", []):
                         tool_name = r.get("tool_name", "unknown")
-                        clean_output = r.copy()
+                        clean_output = _strip_image_urls(r.copy())
                         if "tool_name" in clean_output:
                             del clean_output["tool_name"]
                         filtered_res[tool_name] = clean_output
@@ -1078,6 +1193,11 @@ class PemaliOrchestrator:
             "4. Struktur: # Judul Laporan → ## Ringkasan Eksekutif → ## Temuan → ## Rekomendasi → ## Kesimpulan\n"
             "5. Gunakan bullet points dan numbered list untuk data sensor\n"
             "6. Paragraf pendek (max 4 kalimat per paragraf)\n\n"
+            "# ATURAN BAHASA (WAJIB)\n"
+            "1. BAHASA INDONESIA baku — jangan campur bahasa asing, Polandia, atau Jerman.\n"
+            "2. Ejaan baku: 'sinar' bukan 'sin', 'kemungkinan' bukan 'możliwość', 'berteduh' bukan 'berbayang'.\n"
+            "3. Gunakan istilah sains standar: 'suhu' (bukan temperature), 'kelembaban' (bukan humidity).\n"
+            "4. JANGAN gunakan kata-kata dari bahasa lain selain Indonesia dan Inggris teknis terbatas.\n\n"
             "# ATURAN DATA\n"
             "1. BACA semua data di execution_results dengan saksama — setiap field.\n"
             "2. GUNAKAN data beneran dari sensor — jangan mengarang atau menggeneralisasi.\n"
@@ -1112,6 +1232,25 @@ class PemaliOrchestrator:
         try:
             llm = get_llm_client()
             stream_queue = stream_queue_var.get()
+
+            # Helper: flush token buffer for synthesis phase
+            _synth_buffer: list[str] = []
+            async def _flush_synth():
+                nonlocal _synth_buffer
+                if not _synth_buffer:
+                    return
+                batch = "".join(_synth_buffer)
+                _synth_buffer = []
+                await telemetry.emit_dict({
+                    "type": "agent_thinking",
+                    "agent_id": "manager",
+                    "agent_name": "Manager",
+                    "chunk": batch,
+                    "phase": "synthesis",
+                    "trace_id": trace_id,
+                    "timestamp": int(time.time())
+                })
+
             if stream_queue is not None:
                 logger.debug("[Manager] Streaming synthesis LLM call")
                 stream = await llm.chat.completions.create(
@@ -1135,10 +1274,14 @@ class PemaliOrchestrator:
                             "node_id": "manager",
                             "content": delta.content
                         })
+                        _synth_buffer.append(delta.content)
+                        if len(_synth_buffer) >= 5:
+                            await _flush_synth()
                     if delta.tool_calls:
                         for tc in delta.tool_calls:
                             if tc.function and tc.function.arguments:
                                 args_buf += tc.function.arguments
+                await _flush_synth()
                 synth_narrative = content
                 if args_buf:
                     report = json.loads(args_buf).get("report", "")
@@ -1159,6 +1302,17 @@ class PemaliOrchestrator:
                     report = json.loads(msg.tool_calls[0].function.arguments).get("report", "")
                 else:
                     report = msg.content or ""
+                # Emit full narrative as single chunk for frontend typewriter
+                if synth_narrative:
+                    await telemetry.emit_dict({
+                        "type": "agent_thinking",
+                        "agent_id": "manager",
+                        "agent_name": "Manager",
+                        "chunk": synth_narrative,
+                        "phase": "synthesis",
+                        "trace_id": trace_id,
+                        "timestamp": int(time.time())
+                    })
 
             logger.critical(f"[Manager] === SYNTHESIS NARRATIVE ===")
             logger.critical(f"[Manager] {synth_narrative[:300]}")

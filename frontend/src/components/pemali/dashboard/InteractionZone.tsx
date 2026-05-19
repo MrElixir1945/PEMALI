@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sun, CheckCircle, FileText } from "lucide-react";
+import { Sun, CheckCircle, FileText, MessageSquare, Search as SearchIcon } from "lucide-react";
 import type { ChatMessage } from "@/lib/dashboard";
 
 // ── Icons ──
@@ -71,9 +71,24 @@ export function ChatMessages({
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Filter out internal / non-human-readable assistant messages
+  function shouldHide(m: ChatMessage): boolean {
+    if (m.role !== "assistant") return false;
+    const c = m.content.trim();
+    // Manager narrative heading
+    if (c.startsWith("**Narasi") || c.startsWith("Narasi Analisis")) return true;
+    // Raw JSON plan
+    if (c.startsWith("{") || c.includes('"tasks":') || c.includes('"task_id":')) return true;
+    // Tool call artifact
+    if (c.includes("create_audit_plan")) return true;
+    // Very short technical fragments
+    if (c.length < 5) return true;
+    return false;
+  }
+
   return (
     <div className="flex flex-col gap-8 w-full">
-      {messages.map((m, i) => {
+      {messages.filter(m => !shouldHide(m)).map((m, i) => {
         const isReport = m.role === "assistant" && (m.content.startsWith("# Laporan") || m.content.startsWith("# ") || m.content.includes("Audit Selesai"));
 
         return (
@@ -84,10 +99,7 @@ export function ChatMessages({
             transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
             className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
           >
-            {/* Role Label */}
-            <span className="text-[10px] font-bold text-[var(--pemali-text-muted)] uppercase tracking-widest mb-2 px-1">
-              {m.role === "user" ? "Penanya" : "Auditor"}
-            </span>
+
 
             {isReport ? (
               <div className="w-full">
@@ -115,6 +127,7 @@ export function ChatMessages({
   );
 }
 
+
 export function ChatInput({
   onSend,
   disabled,
@@ -130,12 +143,17 @@ export function ChatInput({
     if (!v || disabled) return;
     onSend(v);
     setValue("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
   };
 
   return (
     <div className="w-full">
-      <div className="flex flex-col bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded-2xl p-4 focus-within:border-[var(--pemali-border-glow)] transition-all duration-300 shadow-xl">
+      <div 
+        className="w-full flex items-end gap-3 bg-[#e8e4dd] rounded-[9999px] px-5 py-[14px] shadow-[0_1px_4px_rgba(0,0,0,0.08)] focus-within:ring-1 focus-within:ring-[var(--pemali-accent)]/30 transition-all duration-300"
+        title="Enter kirim · Shift+Enter baris baru"
+      >
         <textarea
           ref={textareaRef}
           value={value}
@@ -144,7 +162,7 @@ export function ChatInput({
             if (disabled) return;
             setValue(e.target.value);
             e.target.style.height = "auto";
-            e.target.style.height = Math.min(e.target.scrollHeight, 180) + "px";
+            e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
           }}
           onKeyDown={(e) => {
             if (disabled) return;
@@ -153,23 +171,19 @@ export function ChatInput({
               handleSend();
             }
           }}
-          placeholder={disabled ? "PEMALI sedang memproses data..." : "Ketik instruksi audit atau pertanyaan..."}
+          placeholder={disabled ? "PEMALI sedang memproses data..." : "Apa yang bisa saya bantu hari ini?"}
+          className="flex-1 bg-transparent text-[var(--pemali-text-primary)] placeholder-[var(--pemali-text-muted)] text-[14px] resize-none outline-none leading-relaxed max-h-[180px] overflow-y-auto pt-0.5 disabled:opacity-50"
           rows={1}
-          className="w-full bg-transparent border-none outline-none resize-none text-[15px] text-[var(--pemali-text-primary)] leading-relaxed placeholder:text-[var(--pemali-text-muted)] disabled:opacity-50 min-h-[44px]"
-          style={{ fontFamily: "inherit" }}
+          style={{ minHeight: '24px', fontFamily: "inherit" }}
         />
-        <div className="flex justify-between items-center mt-3 pt-3 border-t border-[var(--pemali-border)]/50">
-          <div className="flex gap-4">
-            <span className="text-[10px] text-[var(--pemali-text-muted)] font-mono uppercase tracking-widest">Mode Editor</span>
-          </div>
-          <button
-            onClick={handleSend}
-            disabled={disabled || !value.trim()}
-            className="px-5 py-1.5 bg-[var(--pemali-accent)] hover:bg-[var(--pemali-accent)]/90 text-white rounded-lg text-[12px] font-semibold transition-all shadow-lg disabled:opacity-30"
-          >
-            Kirim
-          </button>
-        </div>
+
+        <button
+          onClick={handleSend}
+          disabled={disabled || !value.trim()}
+          className="w-7 h-7 mb-0.5 shrink-0 rounded-full bg-[var(--pemali-accent)] flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-opacity"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
       </div>
     </div>
   );

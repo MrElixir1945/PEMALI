@@ -24,10 +24,15 @@ export default function CTASection() {
           </div>
           <h2 className="text-3xl md:text-4xl font-medium mb-6" style={{ fontFamily: "var(--font-lora)", color: "var(--pemali-text-primary)" }}>Siap menjaga keseimbangan alam Bali?</h2>
           <p className="text-base mb-10 leading-relaxed" style={{ color: "var(--pemali-text-muted)" }}>Bergabung dengan ekosistem agent yang bekerja 24/7 untuk memantau dan melindungi bentang alam Bali berdasarkan nilai-nilai Tri Hita Karana.</p>
-          <Link href="/dashboard" className="inline-flex items-center px-8 py-4 rounded-lg text-sm font-medium transition-all group" style={{ backgroundColor: "var(--pemali-text-primary)", color: "var(--pemali-bg)" }}>
-            Mulai Audit Sekarang
-            <span className="ml-2 inline-block transition-transform group-hover:translate-x-0.5">&rarr;</span>
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Link href="/dashboard" className="inline-flex items-center px-8 py-4 rounded-lg text-sm font-medium transition-all group" style={{ backgroundColor: "var(--pemali-text-primary)", color: "var(--pemali-bg)" }}>
+              Mulai Audit Sekarang
+              <span className="ml-2 inline-block transition-transform group-hover:translate-x-0.5">&rarr;</span>
+            </Link>
+            <Link href="/monitor" className="inline-flex items-center px-8 py-4 rounded-lg text-sm font-medium transition-all border" style={{ borderColor: "var(--pemali-border)", color: "var(--pemali-text-secondary)" }}>
+              Buka Ruang Pemantauan
+            </Link>
+          </div>
         </motion.div>
       </div>
     </section>

@@ -112,7 +112,6 @@ class WeatherHazardMonitor(PemaliModuleV2):
                 uv_index = current["uv"]
                 is_day = current["is_day"]
                 condition_text = condition["text"]
-                condition_icon = condition["icon"]
 
                 # Air quality (if available)
                 aqi_data = {}
@@ -223,7 +222,6 @@ class WeatherHazardMonitor(PemaliModuleV2):
                     "uv_display": str(uv_index),
                     "is_day": bool(is_day),
                     "condition": condition_text,
-                    "condition_icon": f"https:{condition_icon}",
                     "air_quality": aqi_data if aqi_data else None,
                     "hazard_level": hazard_level,
                     "warnings": warnings,

@@ -58,4 +58,13 @@ class TelemetryManager:
                 logger.warning(f"[Telemetry] Event emitted but no subscribers: {data.get('node_id')} - {data.get('state')}")
         await asyncio.sleep(0)
 
+    async def emit_dict(self, data: dict):
+        """Emit raw dict event to all subscribers (for high-frequency token events)."""
+        for queue in self.queues:
+            try:
+                await queue.put(data)
+            except Exception as e:
+                logger.error(f"[Telemetry] emit_dict error: {e}")
+        await asyncio.sleep(0)
+
 telemetry = TelemetryManager()

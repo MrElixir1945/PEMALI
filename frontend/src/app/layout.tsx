@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Lora, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import NarrativeStream from "@/components/pemali/NarrativeStream";
+import StatusBar from "@/components/pemali/StatusBar";
 
 const lora = Lora({
   variable: "--font-lora",
@@ -33,6 +35,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${lora.variable} ${geistSans.variable} ${geistMono.variable} antialiased bg-[var(--pemali-bg)] text-[var(--pemali-text-primary)] min-h-screen flex flex-col font-sans`}>
+        <NarrativeStream />
+        <StatusBar />
         {children}
       </body>
     </html>

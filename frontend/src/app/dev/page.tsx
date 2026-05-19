@@ -5,7 +5,6 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import NarrativeStream from "@/components/pemali/NarrativeStream";
 import ModuleOutputDevPanel from "@/components/pemali/ModuleOutputDevPanel";
 
 const container = {
@@ -29,8 +28,6 @@ export default function DevPage() {
 
   return (
     <div className="min-h-screen bg-[var(--pemali-bg)] text-[var(--pemali-text-primary)]">
-      <NarrativeStream />
-
       <motion.div
         className="max-w-4xl mx-auto px-5 py-12"
         variants={container}

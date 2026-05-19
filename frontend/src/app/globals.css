@@ -22,6 +22,8 @@
 
   --pemali-accent: #D4956A;
   --pemali-accent-dim: rgba(212, 149, 106, 0.08);
+
+  --color-background-tertiary: #F0EFEA;
 }
 
 @theme inline {
@@ -34,6 +36,8 @@
 body {
   background: var(--pemali-bg);
   color: var(--pemali-text-primary);
+  /* Force vertical scrollbar space to prevent layout shifts */
+  overflow-y: scroll;
 }
 
 .dag-grid {

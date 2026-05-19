@@ -1,75 +1,240 @@
+"use client";
+
 import NavBar from "@/components/NavBar";
 import Footer from "@/components/Footer";
 import CodeBlock from "@/components/CodeBlock";
-import { Server, Database, Cpu, Layers } from "lucide-react";
+import {
+  GitBranch, Network, Cpu, FileJson,
+  Zap, Layers, Workflow,
+} from "lucide-react";
+import { motion } from "framer-motion";
+
+const telegramFlow = `# Data yang dikirim ke dashboard secara real-time
+# Setiap kali agen berubah status, data berikut dikirim:
+
+{
+  "trace_id": "tr-abc123",
+  "node_id": "geo_agent",
+  "node_type": "SubAgent",
+  "state": "THINKING",
+  "narrative": "Saya akan memeriksa data vegetasi Ubud...",
+  "timestamp": 1712345678
+}
+
+# Frontend cukup mendengarkan melalui EventSource:
+# new EventSource("/api/telemetry")`;
+
+const dagDiagram = `# Manager Agent menyusun rencana kerja seperti berikut:
+# Tugas tanpa dependensi dijalankan BERSAMAAN (paralel)
+
+geo_agent ──────────────┐
+                        ├──→ synthesis (menunggu semua selesai)
+osint_agent ────────────┘
+
+# Apabila terdapat 3 tugas, 2 tugas pertama berjalan bersamaan,
+# tugas ketiga menunggu 2 tugas sebelumnya`;                                
+
+const manifestExample = `# Contoh "manifest" atau identitas modul
+# Ini memberitahu sistem: "Fungsi apa yang saya miliki?"
+
+{
+  "name": "weather_hazard_monitor",
+  "description": "Mengambil data cuaca ekstrem di suatu lokasi",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "location": {
+        "type": "string",
+        "description": "Nama lokasi di Bali"
+      }
+    },
+    "required": ["location"]
+  }
+}`;
+
+const stackItems = [
+  {
+    icon: Workflow,
+    label: "Koordinator",
+    value: "Manager Agent",
+    desc: "Berfungsi seperti project manager. Manager Agent yang merencanakan, membagi tugas, dan memastikan seluruh sub-agent menyelesaikan pekerjaan tepat waktu.",
+  },
+  {
+    icon: Cpu,
+    label: "Tim Spesialis",
+    value: "Sub-Agent (×4)",
+    desc: "Terdiri dari geo_agent (data satelit), water_agent (kualitas air), fire_agent (titik panas), dan osint_agent (berita). Masing-masing memiliki perangkat sendiri.",
+  },
+  {
+    icon: Layers,
+    label: "Perangkat Sensor",
+    value: "Modul Sensor (10+)",
+    desc: "Modul seperti weather_hazard_monitor, fire_hotspot_detector, dan lainnya. Cukup menambahkan file, sistem akan mendeteksi secara otomatis.",
+  },
+  {
+    icon: Zap,
+    label: "Siaran Langsung",
+    value: "SSE Telemetry",
+    desc: "Setiap langkah agen dikirim langsung ke dashboard. Pengguna dapat melihat proses berpikir agen secara real-time.",
+  },
+  {
+    icon: GitBranch,
+    label: "Alur Kerja",
+    value: "DAG Orchestration",
+    desc: "Tugas yang tidak saling terkait dikerjakan secara bersamaan. Tugas yang memerlukan data dari agen lain akan menunggu terlebih dahulu.",
+  },
+  {
+    icon: FileJson,
+    label: "Penyimpanan",
+    value: "PostgreSQL + ChromaDB",
+    desc: "Data audit disimpan di database SQL. Vector embedding disimpan agar dapat ditanyakan kembali melalui fitur RAG (Retrieval-Augmented Generation).",
+  },
+];
 
 export default function EngineeringPage() {
-  const satelliteManifest = `@property
-def manifest(self) -> Dict[str, Any]:
-    return {
-        "name": "satellite_intelligence",
-        "description": "Fetch live sentinel-2 data",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string"
-                }
-            },
-            "required": ["location"]
-        }
-    }`;
-
   return (
     <>
       <NavBar />
-      <main className="flex-1 max-w-4xl mx-auto px-8 py-16 w-full text-stone-800">
-        <div className="prose prose-stone max-w-none">
-          <h1 className="font-serif text-5xl font-semibold mb-8 text-stone-900">Engineering</h1>
-          <p className="text-xl text-stone-600 font-light leading-relaxed mb-12">
-            Infrastruktur lab yang tangguh. Memanfaatkan Fedora, Proxmox, dan FastAPI untuk mengelola orkestrasi agen secara terdistribusi.
-          </p>
-
-          <div className="poleng-divider my-12"></div>
-
-          <h2 className="font-serif text-3xl font-semibold mb-8 text-stone-800">Stack Teknologi</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 my-12 text-center">
-            <div className="bg-white border border-stone-200 p-6 rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
-              <Cpu className="w-8 h-8 mx-auto mb-3 text-stone-400" />
-              <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Host OS</div>
-              <div className="text-sm font-medium text-stone-900">Fedora Labs</div>
+      <main
+        className="flex-1 min-h-screen"
+        style={{ backgroundColor: "var(--color-background-tertiary, #F0EFEA)" }}
+      >
+        <div className="max-w-4xl mx-auto px-6 lg:px-8 py-16">
+          {/* Header */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+            className="mb-12"
+          >
+            <div className="text-[11px] font-mono uppercase tracking-[0.1em] mb-3" style={{ color: "#888780" }}>
+              Engineering
             </div>
-            <div className="bg-white border border-stone-200 p-6 rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
-              <Server className="w-8 h-8 mx-auto mb-3 text-stone-400" />
-              <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Virtualization</div>
-              <div className="text-sm font-medium text-stone-900">Proxmox VE</div>
-            </div>
-            <div className="bg-white border border-stone-200 p-6 rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
-              <Layers className="w-8 h-8 mx-auto mb-3 text-stone-400" />
-              <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Backend</div>
-              <div className="text-sm font-medium text-stone-900">FastAPI</div>
-            </div>
-            <div className="bg-white border border-stone-200 p-6 rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
-              <Database className="w-8 h-8 mx-auto mb-3 text-stone-400" />
-              <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Database</div>
-              <div className="text-sm font-medium text-stone-900">PostgreSQL</div>
-            </div>
-          </div>
+            <h1 className="font-serif text-[40px] font-light tracking-tight text-[var(--pemali-text-primary)] leading-[1.15] mb-4">
+              Cara Kerja Sistem
+            </h1>
+            <p className="text-[14px] text-[var(--pemali-text-secondary)] leading-relaxed max-w-2xl">
+              Secara sederhana, PEMALI dapat diibaratkan sebagai sebuah perusahaan kecil yang memiliki 
+              seorang <strong>manager</strong>, beberapa <strong>tim spesialis</strong>, dan berbagai 
+              <strong>perangkat</strong>. Seluruh aktivitas mereka dapat dipantau langsung dari dashboard.
+            </p>
+          </motion.div>
 
-          <h2 className="font-serif text-3xl font-semibold mb-6 text-stone-800">Unified Tool Interface (UTI)</h2>
-          <p className="text-stone-600 leading-relaxed mb-8">
-            Setiap modul dalam sistem PEMALI mengikuti standar Unified Tool Interface, memungkinkan orkestrator untuk memanggil alat secara dinamis berdasarkan kebutuhan audit.
-          </p>
+          {/* Komponen Utama — grid 3 kolom */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-16"
+          >
+            {stackItems.map((item, i) => (
+              <div
+                key={item.label}
+                className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#F1EFE8" }}>
+                    <item.icon size={15} className="text-[#5F5E5A]" strokeWidth={1.5} />
+                  </div>
+                  <span className="text-[10px] font-mono uppercase tracking-[0.08em] font-medium" style={{ color: "#B4B2A9" }}>
+                    {item.label}
+                  </span>
+                </div>
+                <div className="text-[13px] font-medium text-[var(--pemali-text-primary)] mb-1">
+                  {item.value}
+                </div>
+                <p className="text-[11px] text-[var(--pemali-text-secondary)] leading-relaxed">
+                  {item.desc}
+                </p>
+              </div>
+            ))}
+          </motion.div>
 
-          <CodeBlock 
-            code={satelliteManifest} 
-            filename="modules/satellite_mod.py" 
-          />
+          {/* Alur Kerja DAG */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+            className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-6 mb-6"
+          >
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "#E8EDE8" }}>
+                <GitBranch size={15} className="text-[#4A5E4A]" strokeWidth={1.5} />
+              </div>
+              <div>
+                <h2 className="text-[14px] font-medium text-[var(--pemali-text-primary)] mb-1">
+                  Alur Kerja: DAG (Directed Acyclic Graph)
+                </h2>
+                <p className="text-[12px] text-[var(--pemali-text-secondary)] leading-relaxed">
+                  Manager Agent menyusun rencana kerja dalam bentuk <strong>grafik tugas</strong>.
+                  Sebagai ilustrasi, ketika memasak: sambil menunggu air mendidih, kita dapat memotong bawang.
+                  Tidak perlu menunggu satu per satu. PEMALI bekerja dengan prinsip yang sama.
+                </p>
+              </div>
+            </div>
+            <CodeBlock code={dagDiagram} filename="Alur DAG — tugas independen berjalan paralel" />
+          </motion.div>
 
-          <h2 className="font-serif text-3xl font-semibold mb-6 mt-12 text-stone-800">Infrastruktur Lab</h2>
-          <p className="text-stone-600 leading-relaxed">
-            Sistem berjalan di lingkungan lab terisolasi yang dioptimalkan untuk beban kerja AI agentic. Pipeline data dari sensor satelit diproses secara paralel oleh worker node untuk menjamin latensi rendah dalam pelaporan audit.
-          </p>
+          {/* Telemetry */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+            className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-6 mb-6"
+          >
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "#E8ECF0" }}>
+                <Zap size={15} className="text-[#4A5670]" strokeWidth={1.5} />
+              </div>
+              <div>
+                <h2 className="text-[14px] font-medium text-[var(--pemali-text-primary)] mb-1">
+                  Data Real-Time ke Dashboard
+                </h2>
+                <p className="text-[12px] text-[var(--pemali-text-secondary)] leading-relaxed">
+                  Setiap kali agen berubah status (dari "berpikir" menjadi "bekerja" kemudian "selesai"),
+                  data langsung dikirim ke dashboard menggunakan teknologi <strong>SSE (Server-Sent Events)</strong>.
+                  Halaman tidak perlu di-refresh — semua informasi muncul secara otomatis.
+                </p>
+              </div>
+            </div>
+            <CodeBlock code={telegramFlow} filename="Contoh data yang dikirim ke dashboard" />
+          </motion.div>
+
+          {/* UTI */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.25 }}
+            className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-6 mb-6"
+          >
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "#EEEDF0" }}>
+                <Network size={15} className="text-[#5A4A6B]" strokeWidth={1.5} />
+              </div>
+              <div>
+                <h2 className="text-[14px] font-medium text-[var(--pemali-text-primary)] mb-1">
+                  Modul: Perangkat Sensor
+                </h2>
+                <p className="text-[12px] text-[var(--pemali-text-secondary)] leading-relaxed">
+                  Modul merupakan perangkat yang digunakan sub-agent untuk mengambil data sesungguhnya.
+                  Contohnya <em>weather_hazard_monitor</em> untuk memeriksa cuaca, atau <em>fire_hotspot_detector</em>
+                  untuk mendeteksi sumber api. Ingin menambahkan modul baru? Cukup membuat file Python,
+                  sistem akan secara otomatis mendeteksi dan mendaftarkannya — tanpa perlu memodifikasi kode lainnya.
+                </p>
+              </div>
+            </div>
+            <CodeBlock code={manifestExample} filename="Contoh identitas modul" />
+          </motion.div>
+
+          {/* Footer */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.4, delay: 0.3 }}
+            className="text-[11px] text-center mt-12 font-mono" style={{ color: "#B4B2A9" }}
+          >
+            PEMALI Core v2.6 — Stack: Next.js 16 · FastAPI · PostgreSQL · ChromaDB
+          </motion.div>
         </div>
       </main>
       <Footer />

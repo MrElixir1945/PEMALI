@@ -1,13 +1,44 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useTelemetryStore } from "@/stores/telemetryStore";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://10.10.20.254:8000";
 
 export default function NarrativeStream() {
-  const { addEvent, setConnected } = useTelemetryStore();
+  const addEvent = useTelemetryStore((s) => s.addEvent);
+  const setConnected = useTelemetryStore((s) => s.setConnected);
+  const applyThinkingChunk = useTelemetryStore((s) => s.applyThinkingChunk);
+  const setAgentDone = useTelemetryStore((s) => s.setAgentDone);
   const esRef = useRef<EventSource | null>(null);
+
+  const handleMessage = useCallback(
+    (e: MessageEvent) => {
+      try {
+        const event = JSON.parse(e.data);
+
+        // Route agent_thinking events to separate buffer (not main events[])
+        if (event.type === "agent_thinking") {
+          applyThinkingChunk(event);
+          return;
+        }
+
+        // Detect SubAgent/Module DONE/ERROR → mark thinking stream as done
+        if (
+          event.node_id &&
+          event.node_type !== "Manager" &&
+          (event.state === "DONE" || event.state === "ERROR")
+        ) {
+          setAgentDone(event.node_id);
+        }
+
+        addEvent(event);
+      } catch (err) {
+        console.error("[SSE] Parse error:", err);
+      }
+    },
+    [addEvent, applyThinkingChunk, setAgentDone]
+  );
 
   useEffect(() => {
     const connect = () => {
@@ -20,14 +51,7 @@ export default function NarrativeStream() {
         setConnected(true);
       };
 
-      es.onmessage = (e) => {
-        try {
-          const event = JSON.parse(e.data);
-          addEvent(event);
-        } catch (err) {
-          console.error("[SSE] Parse error:", err);
-        }
-      };
+      es.onmessage = handleMessage;
 
       es.onerror = () => {
         console.warn("[SSE] Connection error — retrying in 3s");
@@ -44,7 +68,7 @@ export default function NarrativeStream() {
     return () => {
       if (esRef.current) esRef.current.close();
     };
-  }, [addEvent, setConnected]);
+  }, [handleMessage, setConnected]);
 
   return null;
 }
