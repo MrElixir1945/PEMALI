@@ -26,7 +26,7 @@ interface ReportListResponse {
   reports: ReportSummary[];
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 const container = {
   hidden: { opacity: 0 },

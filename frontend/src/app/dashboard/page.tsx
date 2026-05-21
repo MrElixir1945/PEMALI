@@ -817,7 +817,7 @@ export default function PemaliDashboard() {
   const [mainView, setMainView] = useState<"chat" | "recents">("chat");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
   const [systemStatus, setSystemStatus] = useState<{
     fastapi_active: boolean;

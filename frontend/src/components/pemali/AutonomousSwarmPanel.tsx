@@ -42,7 +42,7 @@ interface CaseItem { case_id: string; title: string; priority: number; intent: s
 interface EvaluationData { was_decision_correct?: boolean; strategy_adjustments?: string; confidence?: number; is_first_cycle?: boolean; evaluation_failed?: boolean; }
 interface ScanSummary { weather?: { avg_temp: number; max_temp: number }; fire_hotspots?: { count: number; status: string }; earthquakes?: { count_24h: number; max_mag: number }; air_quality?: { worst_aqi: number; worst_location: string }; }
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 const POLL_INTERVAL = 10000;
 
 const fmtDate = (iso: string) => {

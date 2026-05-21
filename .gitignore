@@ -23,7 +23,6 @@ env/
 virtualenv/
 
 # --- Environment files ---
-.env
 .env.*
 !.env.example
 !.env.template
@@ -153,3 +152,5 @@ frontend/public/logo.png
 *.png
 !frontend/public/images/*.png
 agentic_mode_dashboard.png
+.env
+backend/.env

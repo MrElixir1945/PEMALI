@@ -65,7 +65,7 @@ export default function MonitorPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [chatPrompt, setChatPrompt] = useState("");
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
   // Filter, pagination, and collapse states for Log Pelanggaran Alam
   const [searchQuery, setSearchQuery] = useState("");

@@ -33,7 +33,7 @@ interface ReportDetail {
   created_at: string;
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 const priorityColor = (p: number) => {
   if (p >= 8) return "rgb(176,112,104)";
