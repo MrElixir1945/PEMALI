@@ -16,6 +16,8 @@ class TelemetryManager:
         queue = asyncio.Queue()
         self.queues.append(queue)
         logging.info(f"[Telemetry] New subscriber. Total queues: {len(self.queues)}")
+        # Kirim event koneksi segera — biar proxy gak timeout
+        yield f"data: {json.dumps({'type': 'connected', 'message': 'SSE connected'})}\n\n"
         try:
             while True:
                 data = await queue.get()

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useTelemetryStore } from "@/stores/telemetryStore";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://10.10.20.254:8000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
 
 export default function NarrativeStream() {
   const addEvent = useTelemetryStore((s) => s.addEvent);

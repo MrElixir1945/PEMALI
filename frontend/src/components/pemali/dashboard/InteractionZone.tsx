@@ -13,7 +13,7 @@ const Icons = {
   CheckCircle: () => <CheckCircle size={20} aria-hidden={true} />,
   FileText: () => <FileText size={18} aria-hidden={true} />,
   Logo: ({ className }: { className?: string }) => (
-    <img src="/logo.png" alt="PEMALI" className={className || "w-full h-full object-contain"} />
+    <img src="/images/logo.png" alt="PEMALI" className={className || "w-full h-full object-contain"} />
   )
 };
 
@@ -102,8 +102,23 @@ export function ChatMessages({
 
 
             {isReport ? (
-              <div className="w-full">
-                <AuditReportCard onOpen={onOpenReport || (() => {})} narrative={m.content} />
+              <div className="w-full flex flex-col gap-2.5">
+                <div
+                  className="w-full px-5 py-4.5 text-[14px] leading-relaxed tracking-tight text-[var(--pemali-text-primary)] bg-[var(--pemali-surface)]/20 border border-[var(--pemali-border)] rounded-2xl shadow-sm"
+                  style={{ fontFamily: "'Lora', serif" }}
+                >
+                  <div className="prose max-w-none prose-p:text-[var(--pemali-text-primary)] prose-p:leading-relaxed prose-headings:text-[var(--pemali-text-primary)] prose-li:text-[var(--pemali-text-primary)] prose-strong:text-[var(--pemali-text-primary)]">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                  </div>
+                </div>
+                {/* Tiny inspect button below the report */}
+                <button
+                  onClick={onOpenReport}
+                  className="self-end px-2.5 py-1 text-[10px] font-mono text-[var(--pemali-text-secondary)] hover:text-[var(--pemali-text-primary)] hover:bg-[var(--pemali-surface)] border border-[var(--pemali-border)] rounded transition-all flex items-center gap-1.5 active:scale-95 shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
+                >
+                  <SearchIcon size={10} />
+                  <span>Tinjau Alur Berpikir AI</span>
+                </button>
               </div>
             ) : (
               <div
@@ -151,7 +166,7 @@ export function ChatInput({
   return (
     <div className="w-full">
       <div 
-        className="w-full flex items-end gap-3 bg-[#e8e4dd] rounded-[9999px] px-5 py-[14px] shadow-[0_1px_4px_rgba(0,0,0,0.08)] focus-within:ring-1 focus-within:ring-[var(--pemali-accent)]/30 transition-all duration-300"
+        className="w-full flex items-end gap-3 bg-[var(--pemali-surface)] rounded-[9999px] px-5 py-[14px] shadow-[0_1px_4px_rgba(0,0,0,0.08)] focus-within:ring-1 focus-within:ring-[var(--pemali-accent)]/30 transition-all duration-300"
         title="Enter kirim · Shift+Enter baris baru"
       >
         <textarea

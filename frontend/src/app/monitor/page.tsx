@@ -45,10 +45,11 @@ function detectReportIcon(issue: string, location: string) {
 }
 
 const AGENT_ROSTER = [
-  { id: "geo_agent",      name: "geo_agent",      role: "Satellite & Spatial",  color: "#4A5E4A", bg: "#E8EDE8", icon: Leaf },
-  { id: "water_agent",    name: "water_agent",    role: "Water Quality Sensor", color: "#4A5670", bg: "#E8ECF0", icon: Cloud },
-  { id: "fire_agent",     name: "fire_agent",     role: "Thermal & Hotspot",    color: "#6B4A3A", bg: "#F0ECE8", icon: Flame },
-  { id: "osint_agent",    name: "osint_agent",    role: "Media & Web Intel",    color: "#5A4A6B", bg: "#EEEDF0", icon: Globe },
+  { id: "geo_agent",       name: "geo_agent",       role: "Satellite & Spatial",     color: "#4A5E4A", bg: "#E8EDE8", icon: Leaf },
+  { id: "water_agent",     name: "water_agent",     role: "Water Quality Sensor",    color: "#4A5670", bg: "#E8ECF0", icon: Cloud },
+  { id: "fire_agent",      name: "fire_agent",      role: "Thermal & Hotspot",       color: "#6B4A3A", bg: "#F0ECE8", icon: Flame },
+  { id: "osint_agent",     name: "osint_agent",     role: "Media & Web Intel",       color: "#5A4A6B", bg: "#EEEDF0", icon: Globe },
+  { id: "scheduler_agent", name: "scheduler_agent", role: "Autonomous Tick Daemon",  color: "#4A5670", bg: "#E8ECF0", icon: Clock },
 ];
 
 const SUGGESTIONS = [
@@ -64,7 +65,13 @@ export default function MonitorPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [chatPrompt, setChatPrompt] = useState("");
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
+
+  // Filter, pagination, and collapse states for Log Pelanggaran Alam
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedSeverity, setSelectedSeverity] = useState("All");
+  const [expandedReportId, setExpandedReportId] = useState<number | null>(null);
+  const [visibleLimit, setVisibleLimit] = useState(10);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -202,7 +209,7 @@ export default function MonitorPage() {
                 variants={item} initial="hidden" animate="show"
                 className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
               >
-                <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center justify-between mb-2">
                   <div className="text-[11px] text-[var(--pemali-text-muted)] uppercase tracking-[0.08em] font-medium">
                     Log Pelanggaran Alam
                   </div>
@@ -215,79 +222,184 @@ export default function MonitorPage() {
                   </div>
                 </div>
 
+                {/* Filter and Search Bar */}
+                <div className="flex flex-col sm:flex-row gap-3 mb-5 mt-2">
+                  <div className="flex-1 flex items-center gap-2 bg-[#f5f4ef] border border-[var(--pemali-border)] rounded-lg px-3 py-1.5 focus-within:border-[var(--pemali-accent)]/45 transition-colors">
+                    <Search size={14} className="text-[var(--pemali-text-muted)] shrink-0" strokeWidth={1.5} />
+                    <input
+                      type="text"
+                      placeholder="Cari lokasi atau jenis pelanggaran..."
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setVisibleLimit(10); // reset page limit on search
+                      }}
+                      className="w-full bg-transparent text-[12px] text-[var(--pemali-text-primary)] placeholder:text-[var(--pemali-text-muted)] outline-none"
+                    />
+                  </div>
+                  <div className="flex gap-1 shrink-0 bg-[#f5f4ef] p-0.5 rounded-lg border border-[var(--pemali-border)]">
+                    {["All", "High", "Medium", "Low"].map((sev) => (
+                      <button
+                        key={sev}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSeverity(sev);
+                          setVisibleLimit(10); // reset page limit on severity filter change
+                        }}
+                        className={`px-2.5 py-1 text-[10px] font-medium rounded-md transition-all ${
+                          selectedSeverity === sev 
+                            ? "bg-white text-[var(--pemali-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.05)] border-[0.5px] border-[#e1ded5]" 
+                            : "text-[var(--pemali-text-muted)] hover:text-[var(--pemali-text-primary)]"
+                        }`}
+                      >
+                        {sev === "All" ? "Semua" : sev}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="flex flex-col gap-3">
                   {loading ? (
                     <div className="text-[12px] text-[var(--pemali-text-muted)] py-10 text-center">
                       Memuat data...
                     </div>
-                  ) : data?.recent_reports && data.recent_reports.length > 0 ? (
-                    data.recent_reports.map((report, idx) => {
-                      const sev = SEVERITY_COLOR[report.severity] || SEVERITY_COLOR.Low;
-                      const meta = detectReportIcon(report.issue_type, report.location);
-                      const Icon = meta.icon;
-                      return (
-                        <motion.div
-                          key={report.id || idx}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.3, delay: idx * 0.03 }}
-                          className="flex items-start gap-3 p-4 border border-[var(--pemali-border)] rounded-xl hover:bg-[var(--pemali-bg)]/40 transition-colors"
-                        >
-                          {/* Icon semantic */}
-                          <div
-                            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-                            style={{ backgroundColor: meta.bg }}
-                          >
-                            <Icon size={16} style={{ color: meta.color }} strokeWidth={1.5} />
-                          </div>
-
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2.5">
-                              <span className="text-[13px] font-medium text-[var(--pemali-text-primary)] truncate">
-                                {report.location}
-                              </span>
-                              <span className="text-[10px] font-mono text-[var(--pemali-text-muted)] shrink-0">
-                                #{report.id}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-[var(--pemali-text-secondary)] mt-0.5 truncate">
-                              {report.issue_type}
-                            </p>
-                          </div>
-
-                          {/* Severity + Time */}
-                          <div className="flex flex-col items-end gap-1.5 shrink-0">
-                            <div
-                              className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider"
-                              style={{
-                                backgroundColor: sev.bg,
-                                color: sev.text,
-                                border: report.severity === "Medium" ? "0.5px solid #D3D1C7" : "none",
-                              }}
-                            >
-                              <span
-                                className="w-1.5 h-1.5 rounded-full"
-                                style={{ backgroundColor: sev.dot }}
-                              />
-                              {report.severity}
-                            </div>
-                            <span className="text-[10px] text-[var(--pemali-text-muted)] font-mono">
-                              {report.time}
-                            </span>
-                          </div>
-                        </motion.div>
-                      );
-                    })
                   ) : error ? (
                     <div className="text-[12px] text-[var(--state-error)] py-10 text-center border border-dashed border-[var(--pemali-border)] rounded-xl">
                       Gagal terhubung ke backend.
                     </div>
-                  ) : (
-                    <div className="text-[12px] text-[var(--pemali-text-muted)] py-10 text-center border border-dashed border-[var(--pemali-border)] rounded-xl">
-                      Belum ada laporan audit.
-                    </div>
-                  )}
+                  ) : (() => {
+                    const filteredReports = (data?.recent_reports || []).filter((report) => {
+                      const matchesSearch = 
+                        report.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        report.issue_type.toLowerCase().includes(searchQuery.toLowerCase());
+                      const matchesSeverity = selectedSeverity === "All" || report.severity === selectedSeverity;
+                      return matchesSearch && matchesSeverity;
+                    });
+
+                    const displayedReports = filteredReports.slice(0, visibleLimit);
+
+                    if (filteredReports.length === 0) {
+                      return (
+                        <div className="text-[12px] text-[var(--pemali-text-muted)] py-10 text-center border border-dashed border-[var(--pemali-border)] rounded-xl">
+                          Tidak ada laporan yang cocok dengan filter aktif.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <>
+                        {displayedReports.map((report, idx) => {
+                          const sev = SEVERITY_COLOR[report.severity] || SEVERITY_COLOR.Low;
+                          const meta = detectReportIcon(report.issue_type, report.location);
+                          const Icon = meta.icon;
+                          const isExpanded = expandedReportId === report.id;
+
+                          return (
+                            <motion.div
+                              key={report.id || idx}
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.3, delay: Math.min(idx * 0.03, 0.3) }}
+                              onClick={() => setExpandedReportId(isExpanded ? null : report.id)}
+                              className={`flex flex-col p-4 border rounded-xl hover:bg-[var(--pemali-bg)]/40 transition-all cursor-pointer ${
+                                isExpanded ? "border-[var(--pemali-accent)]/30 bg-[#fbfbfa]" : "border-[var(--pemali-border)] bg-transparent"
+                              }`}
+                            >
+                              <div className="flex items-start gap-3 w-full">
+                                {/* Icon semantic */}
+                                <div
+                                  className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                                  style={{ backgroundColor: meta.bg }}
+                                >
+                                  <Icon size={16} style={{ color: meta.color }} strokeWidth={1.5} />
+                                </div>
+
+                                {/* Content */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-[13px] font-medium text-[var(--pemali-text-primary)] truncate">
+                                      {report.location}
+                                    </span>
+                                    <span className="text-[10px] font-mono text-[var(--pemali-text-muted)] shrink-0">
+                                      #{report.id}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-[var(--pemali-text-secondary)] mt-0.5 truncate">
+                                    {report.issue_type}
+                                  </p>
+                                </div>
+
+                                {/* Severity + Time */}
+                                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                  <div
+                                    className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider"
+                                    style={{
+                                      backgroundColor: sev.bg,
+                                      color: sev.text,
+                                      border: report.severity === "Medium" ? "0.5px solid #D3D1C7" : "none",
+                                    }}
+                                  >
+                                    <span
+                                      className="w-1.5 h-1.5 rounded-full"
+                                      style={{ backgroundColor: sev.dot }}
+                                    />
+                                    {report.severity}
+                                  </div>
+                                  <span className="text-[10px] text-[var(--pemali-text-muted)] font-mono">
+                                    {report.time}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Detailed expandable content */}
+                              {isExpanded && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: "auto" }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  transition={{ duration: 0.25, ease: "easeInOut" }}
+                                  className="mt-4 pt-4 border-t border-[var(--pemali-border)] text-[11px] text-[var(--pemali-text-secondary)] flex flex-col gap-2 font-sans"
+                                  onClick={(e) => e.stopPropagation()} // prevent double toggle
+                                >
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                                    <div>
+                                      <span className="text-[10px] text-[var(--pemali-text-muted)] uppercase tracking-wider block font-medium">Sektor Tri Hita Karana</span>
+                                      <span className="font-medium text-[var(--pemali-text-primary)] mt-0.5 block">
+                                        {meta.label === "vegetation" || meta.label === "fire" ? "Palemahan (Lingkungan & Alam)" : "Pawongan (Sosial & Kolaborasi)"}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-[10px] text-[var(--pemali-text-muted)] uppercase tracking-wider block font-medium">Waktu Deteksi</span>
+                                      <span className="font-mono text-[var(--pemali-text-primary)] mt-0.5 block">{report.created_at || report.time}</span>
+                                    </div>
+                                    <div className="col-span-2">
+                                      <span className="text-[10px] text-[var(--pemali-text-muted)] uppercase tracking-wider block font-medium">Rincian Temuan Cerdas</span>
+                                      <span className="text-[var(--pemali-text-primary)] block leading-relaxed mt-1">
+                                        Sistem PEMALI mengidentifikasi indikasi anomali {report.issue_type.toLowerCase()} di koordinat sekitar {report.location}. Node kognitif telah memverifikasi temuan ini dan menyimpannya dalam basis data memori jangka panjang untuk mendukung evaluasi berkala ekosistem Bali.
+                                      </span>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </motion.div>
+                          );
+                        })}
+
+                        {/* Pagination / Load More Button */}
+                        {filteredReports.length > visibleLimit && (
+                          <div className="flex justify-center mt-3 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setVisibleLimit(prev => prev + 10)}
+                              className="px-4 py-2.5 text-[11px] font-sans border border-[#e1ded5] rounded-full text-[#1A1916] hover:text-[#1A1916] hover:border-[#c8a882] hover:bg-[#efede6] transition-all bg-white shadow-[0_1px_2px_rgba(0,0,0,0.02)] flex items-center gap-2 select-none active:scale-[0.97]"
+                            >
+                              <span>Muat Lebih Banyak ({filteredReports.length - visibleLimit} tersisa)</span>
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </motion.div>
             </div>

@@ -3,73 +3,64 @@
 /* Direction: Refined Anthropic Editorial — Autonomous Swarm */
 
 import React from "react";
-import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import AutonomousSwarmPanel from "@/components/pemali/AutonomousSwarmPanel";
+import NavBar from "@/components/NavBar";
+
+const container = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.08 } }
+};
+
+const item = {
+  hidden: { opacity: 0, y: 10, filter: "blur(2px)" },
+  show: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.45, ease: [0.0, 0.0, 0.2, 1] as const } }
+};
 
 export default function AgenticPage() {
-  const router = useRouter();
-
   return (
-    <div
-      className="h-screen overflow-hidden relative"
-      style={{
-        background: "#F5F4EF",
-        color: "#1A1916",
-        fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-      }}
-    >
-      {/* Subtle grain — CSS noise, very faint */}
-      <div
-        className="absolute inset-0 pointer-events-none z-0 opacity-[0.015]"
+    <>
+      <NavBar />
+      <motion.div
+        className="min-h-[calc(100vh-56px)] flex flex-col relative"
         style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-          backgroundSize: "200px 200px",
+          backgroundColor: "#F5F4EF",
+          color: "#1A1916",
+          fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
         }}
-      />
+        variants={container}
+        initial="hidden"
+        animate="show"
+      >
+        {/* Subtle grid overlay */}
+        <div
+          className="absolute inset-0 pointer-events-none z-0"
+          style={{
+            backgroundImage: `linear-gradient(rgba(26,25,22,0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(26,25,22,0.015) 1px, transparent 1px)`,
+            backgroundSize: "32px 32px",
+          }}
+        />
 
-      <div className="relative z-10 h-full flex flex-col">
-        {/* Header */}
-        <header className="flex-shrink-0 px-8 pt-5 pb-0">
-          <div className="flex gap-4 mb-2 font-mono text-[11px] tracking-wide" style={{ color: "#7A7670", fontFamily: "var(--font-geist-mono), monospace" }}>
-            <button
-              onClick={() => router.push("/")}
-              className="opacity-40 hover:opacity-70 transition-opacity"
-            >
-              &larr; Landing Page
-            </button>
-            <span className="opacity-20">|</span>
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="opacity-40 hover:opacity-70 transition-opacity"
-            >
-              Dashboard
-            </button>
-          </div>
+        <div className="relative z-10 flex-1 flex flex-col max-w-5xl mx-auto w-full px-6 lg:px-8 py-10 min-h-0">
+          {/* Header */}
+          <motion.div variants={item} className="mb-6 flex-shrink-0">
+            <div className="text-[11px] font-mono uppercase tracking-[0.15em] mb-2" style={{ color: "#888780" }}>
+              01 ——— AGENTIC SWARM PORTAL
+            </div>
+            <h1 className="font-serif text-[38px] font-light tracking-tight text-[#1A1916] leading-tight mb-2">
+              Siklus Otonom PEMALI
+            </h1>
+            <p className="text-[13px] text-[#5F5E5A] leading-relaxed max-w-2xl">
+              Memantau dan mengaudit ekologi Bali secara terus-menerus. Manager Agent dan Sub-Agent bekerja secara mandiri
+              untuk mengidentifikasi pelanggaran, menganalisis bencana, dan menyusun laporan audit yang komprehensif.
+            </p>
+          </motion.div>
 
-          <h1
-            className="text-[28px] font-normal leading-tight tracking-[-0.02em] mb-1"
-            style={{ fontFamily: "var(--font-lora), Georgia, serif", color: "#1A1916" }}
-          >
-            Autonomous Swarm
-          </h1>
-          <p
-            className="text-[13px] leading-relaxed max-w-[480px]"
-            style={{ color: "#7A7670" }}
-          >
-            Agent Otak memantau Bali secara otonom &mdash; memutuskan kasus,
-            menjalankan audit, dan menjadwalkan siklus berikutnya tanpa
-            campur tangan manusia.
-          </p>
-        </header>
-
-        {/* Hairline */}
-        <div className="flex-shrink-0 mx-8 mt-3 mb-0" style={{ height: "1px", background: "rgba(26,25,22,0.07)" }} />
-
-        {/* Main content */}
-        <main className="flex-1 min-h-0 px-8 py-2" style={{ overflow: "hidden" }}>
-          <AutonomousSwarmPanel />
-        </main>
-      </div>
-    </div>
+          <motion.main className="flex-1 min-h-0 flex flex-col bg-[#FCFAF6] border border-[rgba(26,25,22,0.08)] rounded-2xl p-6 shadow-[0_8px_30px_rgba(26,25,22,0.02)]" style={{ overflow: "hidden" }} variants={item}>
+            <AutonomousSwarmPanel />
+          </motion.main>
+        </div>
+      </motion.div>
+    </>
   );
 }

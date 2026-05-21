@@ -8,6 +8,12 @@ from backend.core.base_module import PemaliModuleV2, ModuleOutput
 
 logger = logging.getLogger("PEMALI.Registry")
 
+# Path absolute ke folder modules — gak peduli working directory
+_MODULES_ABS = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "modules"
+)
+
 class ModuleRegistry:
     """
     Manajemen siklus hidup modul (Discovery, Validation, & Execution).
@@ -18,8 +24,8 @@ class ModuleRegistry:
     - Instantiate setiap subclass PemaliModuleV2 yang ditemukan
     - Index by instance.name
     """
-    def __init__(self, modules_dir: str = "backend/modules"):
-        self.modules_dir = modules_dir
+    def __init__(self, modules_dir: str = ""):
+        self.modules_dir = modules_dir if modules_dir else _MODULES_ABS
         self.tools: Dict[str, PemaliModuleV2] = {}
         self._load_failures: Dict[str, str] = {}
         self.load_modules()
@@ -28,6 +34,11 @@ class ModuleRegistry:
         if not os.path.exists(self.modules_dir):
             os.makedirs(self.modules_dir)
 
+        # Compute module import prefix dari absolute path
+        # /home/.../backend/modules -> backend.modules
+        _project_root = os.path.dirname(os.path.dirname(_MODULES_ABS))
+        _import_prefix = os.path.relpath(self.modules_dir, _project_root).replace("/", ".")
+
         for filename in os.listdir(self.modules_dir):
             # Skip: dunder, private/template, non-Python files
             if (not filename.endswith(".py") or 
@@ -35,7 +46,7 @@ class ModuleRegistry:
                 filename.startswith("_")):
                 continue
 
-            module_path = self.modules_dir.replace("/", ".").replace("\\", ".") + "." + filename[:-3]
+            module_path = f"{_import_prefix}.{filename[:-3]}"
             try:
                 mod = importlib.import_module(module_path)
                 for _, obj in inspect.getmembers(mod):

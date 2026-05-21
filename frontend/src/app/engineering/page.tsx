@@ -58,36 +58,42 @@ const stackItems = [
     label: "Koordinator",
     value: "Manager Agent",
     desc: "Berfungsi seperti project manager. Manager Agent yang merencanakan, membagi tugas, dan memastikan seluruh sub-agent menyelesaikan pekerjaan tepat waktu.",
+    image: "/images/engginering/manager agent.png",
   },
   {
     icon: Cpu,
     label: "Tim Spesialis",
-    value: "Sub-Agent (×4)",
-    desc: "Terdiri dari geo_agent (data satelit), water_agent (kualitas air), fire_agent (titik panas), dan osint_agent (berita). Masing-masing memiliki perangkat sendiri.",
+    value: "Sub-Agent (×5)",
+    desc: "Terdiri dari geo_agent (data satelit), water_agent (kualitas air), fire_agent (titik panas), osint_agent (berita & media sosial), dan scheduler_agent (siklus otonom). Masing-masing memiliki perangkat sensor tersendiri.",
+    image: "/images/engginering/sub-agent.png",
   },
   {
     icon: Layers,
     label: "Perangkat Sensor",
-    value: "Modul Sensor (10+)",
-    desc: "Modul seperti weather_hazard_monitor, fire_hotspot_detector, dan lainnya. Cukup menambahkan file, sistem akan mendeteksi secara otomatis.",
+    value: "Modul Sensor (9+)",
+    desc: "9 modul aktif: weather_hazard_monitor, fire_hotspot_detector, air_quality_index, earthquake_risk_monitor, sea_level_tide_monitor, osint_web_search, osint_trend_scanner, osint_instagram_monitor, dan scheduler_mod. Tambah file Python baru, sistem auto-detect.",
+    image: "/images/engginering/sensor.png",
   },
   {
     icon: Zap,
     label: "Siaran Langsung",
     value: "SSE Telemetry",
     desc: "Setiap langkah agen dikirim langsung ke dashboard. Pengguna dapat melihat proses berpikir agen secara real-time.",
+    image: "/images/engginering/sse telementry.png",
   },
   {
     icon: GitBranch,
     label: "Alur Kerja",
     value: "DAG Orchestration",
     desc: "Tugas yang tidak saling terkait dikerjakan secara bersamaan. Tugas yang memerlukan data dari agen lain akan menunggu terlebih dahulu.",
+    image: "/images/engginering/dag orchestration.png",
   },
   {
     icon: FileJson,
     label: "Penyimpanan",
     value: "PostgreSQL + ChromaDB",
     desc: "Data audit disimpan di database SQL. Vector embedding disimpan agar dapat ditanyakan kembali melalui fitur RAG (Retrieval-Augmented Generation).",
+    image: "/images/engginering/database.png",
   },
 ];
 
@@ -133,8 +139,12 @@ export default function EngineeringPage() {
                 className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
               >
                 <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#F1EFE8" }}>
-                    <item.icon size={15} className="text-[#5F5E5A]" strokeWidth={1.5} />
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden" style={{ backgroundColor: "#F1EFE8" }}>
+                    {item.image ? (
+                      <img src={item.image} alt={item.label} className="w-full h-full object-cover" />
+                    ) : (
+                      <item.icon size={22} className="text-[#5F5E5A]" strokeWidth={1.5} />
+                    )}
                   </div>
                   <span className="text-[10px] font-mono uppercase tracking-[0.08em] font-medium" style={{ color: "#B4B2A9" }}>
                     {item.label}
@@ -158,8 +168,8 @@ export default function EngineeringPage() {
             className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-6 mb-6"
           >
             <div className="flex items-start gap-4 mb-4">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "#E8EDE8" }}>
-                <GitBranch size={15} className="text-[#4A5E4A]" strokeWidth={1.5} />
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 overflow-hidden" style={{ backgroundColor: "#E8EDE8" }}>
+                <img src="/images/engginering/dag orchestration.png" alt="DAG" className="w-full h-full object-cover" />
               </div>
               <div>
                 <h2 className="text-[14px] font-medium text-[var(--pemali-text-primary)] mb-1">
@@ -183,8 +193,8 @@ export default function EngineeringPage() {
             className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-6 mb-6"
           >
             <div className="flex items-start gap-4 mb-4">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "#E8ECF0" }}>
-                <Zap size={15} className="text-[#4A5670]" strokeWidth={1.5} />
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 overflow-hidden" style={{ backgroundColor: "#E8ECF0" }}>
+                <img src="/images/engginering/sse telementry.png" alt="SSE Telemetry" className="w-full h-full object-cover" />
               </div>
               <div>
                 <h2 className="text-[14px] font-medium text-[var(--pemali-text-primary)] mb-1">
@@ -208,8 +218,8 @@ export default function EngineeringPage() {
             className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-6 mb-6"
           >
             <div className="flex items-start gap-4 mb-4">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "#EEEDF0" }}>
-                <Network size={15} className="text-[#5A4A6B]" strokeWidth={1.5} />
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 overflow-hidden" style={{ backgroundColor: "#EEEDF0" }}>
+                <img src="/images/engginering/sensor.png" alt="Sensor" className="w-full h-full object-cover" />
               </div>
               <div>
                 <h2 className="text-[14px] font-medium text-[var(--pemali-text-primary)] mb-1">
@@ -233,7 +243,7 @@ export default function EngineeringPage() {
             transition={{ duration: 0.4, delay: 0.3 }}
             className="text-[11px] text-center mt-12 font-mono" style={{ color: "#B4B2A9" }}
           >
-            PEMALI Core v2.6 — Stack: Next.js 16 · FastAPI · PostgreSQL · ChromaDB
+            PEMALI Core v2.6 — Stack: Next.js 15 · FastAPI · PostgreSQL · ChromaDB
           </motion.div>
         </div>
       </main>

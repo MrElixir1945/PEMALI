@@ -168,11 +168,17 @@ class OSINTInstagramMonitor(PemaliModuleV2):
         def _sync_scrape():
             from instaloader import Instaloader, Post
             loader = Instaloader(**instaloader_kwargs)
+            login_user = instaloader_kwargs.get("login_user")
+            login_pass = instaloader_kwargs.get("login_pass")
+            if login_user and login_pass:
+                loader.login(login_user, login_pass)
             post = Post.from_shortcode(loader.context, shortcode)
             return post
 
         try:
-            post = await asyncio.to_thread(_sync_scrape)
+            post = await asyncio.wait_for(
+                asyncio.to_thread(_sync_scrape), timeout=25.0
+            )
         except Exception:
             return None
 
@@ -185,14 +191,16 @@ class OSINTInstagramMonitor(PemaliModuleV2):
         comments_sample = []
         if include_comments:
             try:
-                all_comments = list(post.get_comments())
-                sorted_comments = sorted(
-                    all_comments, key=lambda c: c.likes_count, reverse=True
-                )[:5]
-                comments_sample = [
-                    {"text": c.text[:500], "likes": c.likes_count}
-                    for c in sorted_comments
-                ]
+                def _sync_comments():
+                    all_c = list(post.get_comments())
+                    sorted_c = sorted(all_c, key=lambda c: c.likes_count, reverse=True)[:5]
+                    return [
+                        {"text": c.text[:500], "likes": c.likes_count}
+                        for c in sorted_c
+                    ]
+                comments_sample = await asyncio.wait_for(
+                    asyncio.to_thread(_sync_comments), timeout=15.0
+                )
             except Exception:
                 comments_sample = []
 
@@ -213,6 +221,8 @@ class OSINTInstagramMonitor(PemaliModuleV2):
         instaloader_kwargs = {"quiet": True}
         if username and password:
             instaloader_kwargs["sleep"] = True
+            instaloader_kwargs["login_user"] = username
+            instaloader_kwargs["login_pass"] = password
 
         tasks = []
         for sc in shortcodes[:30]:

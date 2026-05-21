@@ -20,7 +20,7 @@ import { extractDagFromPlan, type TelemetryEvent } from "@/lib/dashboard";
 // ── Icons ──
 const Icons = {
   Brain: ({ className }: { className?: string }) => (
-    <img src="/logo.png" alt="PEMALI Logo" className={className || "w-full h-full object-contain"} />
+    <img src="/images/logo.png" alt="PEMALI Logo" className={className || "w-full h-full object-contain"} />
   ),
   Satellite: () => <Satellite size={20} />,
   Drop: () => <Droplets size={20} />,
@@ -133,13 +133,13 @@ function AgentStatusBar({ icon, title, subtitle, snippet }: {
       animate={{ opacity: 1, y: 0 }}
       className="flex items-start gap-4 w-full p-4 rounded-xl bg-[var(--pemali-surface)]/50 border border-[var(--pemali-border)] opacity-80 hover:opacity-100 transition-opacity"
     >
-      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style={{ backgroundColor: "var(--pemali-accent-dim)", color: "var(--pemali-text-muted)" }}>
         {icon}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
           <div className="text-[13px] font-semibold text-[var(--pemali-text-primary)]">{title}</div>
-          <div className="text-[9px] px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-400 bg-emerald-500/5 font-mono uppercase tracking-tighter shrink-0 ml-2">
+          <div className="text-[9px] px-2 py-0.5 rounded-full font-mono uppercase tracking-tighter shrink-0 ml-2 border" style={{ borderColor: "var(--pemali-border)", color: "var(--pemali-text-muted)", backgroundColor: "var(--pemali-surface)" }}>
             Selesai
           </div>
         </div>
@@ -157,9 +157,16 @@ function AgentStatusBar({ icon, title, subtitle, snippet }: {
 // ── Connector Line (antar card) ──
 function ConnectorLine() {
   return (
-    <div className="flex flex-col items-center -my-3 relative z-10">
-      <div className="w-[2px] h-7 bg-gradient-to-b from-[var(--pemali-accent)]/40 to-[var(--pemali-accent)]/10 rounded-full" />
-      <div className="w-1.5 h-1.5 rounded-full bg-[var(--pemali-accent)]/30 mt-0.5" />
+    <div className="flex justify-center relative z-10">
+      <div className="w-[1.5px] h-9" style={{ backgroundColor: "var(--pemali-border)" }} />
+    </div>
+  );
+}
+
+function EndDot() {
+  return (
+    <div className="flex justify-center relative z-10 py-2">
+      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "var(--pemali-text-muted)" }} />
     </div>
   );
 }
@@ -227,6 +234,7 @@ const agentDisplay: Record<string, { title: string; subtitle: string; icon: Reac
 export function AgentArea({ events }: { events: TelemetryEvent[] }) {
   const dagPlan = useMemo(() => extractDagFromPlan(events), [events]);
   const agentOrder = dagPlan.agents;
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   const doneSet = useMemo(() => {
     const set = new Set<string>();
@@ -285,6 +293,11 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
     }
   }, [currentIdx, agentOrder, doneSet, typingDone, fastMode]);
 
+  // Auto-scroll ke node terbaru
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [currentIdx, showSynthesis, isSynthesisDone]);
+
   // Current tool name for active agent
   const currentTool = useMemo(() => {
     if (!activeAgent) return "";
@@ -299,19 +312,54 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
   if (events.length === 0) return <ObservationWelcome />;
 
   const hasAudit = agentOrder.length > 0;
+  const totalNodes = agentOrder.length + (showSynthesis ? 1 : 0);
+  const renderedNodes: { type: "node" | "synthesis"; agent?: string; idx: number }[] = [];
+
+  agentOrder.forEach((agent, idx) => {
+    const isDone = doneSet.has(agent);
+    const isActive = idx === currentIdx;
+    const isCollapsed = idx < currentIdx || (isActive && isDone) || (fastMode && isDone);
+    if (!isCollapsed || isDone) {
+      renderedNodes.push({ type: "node", agent, idx });
+    }
+  });
+
+  if (hasAudit && showSynthesis) {
+    renderedNodes.push({ type: "synthesis", idx: agentOrder.length });
+  }
 
   return (
     <div className="flex flex-col items-center gap-4 py-8 max-w-4xl mx-auto w-full relative">
       {hasAudit && <PhaseDots currentPhase={visualPhase} />}
 
       <div className="w-full flex flex-col items-center gap-0 relative px-2">
+        {/* Manager Agent — always first, no connector above */}
         <AgentStatusBar icon={<Icons.Brain />} title="Manager Agent" subtitle="Strategic Planning" />
 
-        {agentOrder.map((agent, idx) => {
+        {/* Nodes */}
+        {renderedNodes.map((node, i) => {
+          const isLast = i === renderedNodes.length - 1;
+          if (node.type === "synthesis") {
+            return (
+              <React.Fragment key="synthesis">
+                <ConnectorLine />
+                <WorkflowNode
+                  agentId="manager"
+                  title="Final Synthesis"
+                  subtitle="Manager Agent"
+                  status={isSynthesisDone ? "DONE" : "EXECUTING"}
+                  icon={<Icons.FileText />}
+                />
+                {isLast && <EndDot />}
+              </React.Fragment>
+            );
+          }
+
+          const agent = node.agent!;
           const display = agentDisplay[agent];
           const isDone = doneSet.has(agent);
-          const isActive = idx === currentIdx;
-          const isCollapsed = idx < currentIdx || (isActive && isDone) || (fastMode && isDone);
+          const isActive = agent === activeAgent;
+          const isCollapsed = agentOrder.indexOf(agent) < currentIdx || (isActive && isDone) || (fastMode && isDone);
 
           return (
             <React.Fragment key={agent}>
@@ -322,7 +370,7 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
                   title={display?.title || agent.replace(/_/g, " ")}
                   subtitle={display?.subtitle || agent}
                 />
-              ) : isActive ? (
+              ) : (
                 <WorkflowNode
                   agentId={agent}
                   title={display?.title || agent.replace(/_/g, " ")}
@@ -331,23 +379,13 @@ export function AgentArea({ events }: { events: TelemetryEvent[] }) {
                   icon={display?.icon || <Icons.Globe />}
                   toolName={currentTool}
                 />
-              ) : null}
+              )}
+              {isLast && !showSynthesis && <EndDot />}
             </React.Fragment>
           );
         })}
 
-        {hasAudit && showSynthesis && (
-          <React.Fragment>
-            <ConnectorLine />
-            <WorkflowNode
-              agentId="manager"
-              title="Final Synthesis"
-              subtitle="Manager Agent"
-              status={isSynthesisDone ? "DONE" : "EXECUTING"}
-              icon={<Icons.FileText />}
-            />
-          </React.Fragment>
-        )}
+        <div ref={bottomRef} />
       </div>
     </div>
   );
@@ -409,7 +447,7 @@ function WorkflowNode({ agentId, title, subtitle, status, icon, toolName }: {
               isRunning
                 ? "border-[var(--pemali-accent)]/50 text-[var(--pemali-accent)] bg-[var(--pemali-accent)]/5"
                 : isDone
-                ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/5"
+                ? "border-[var(--pemali-border)] text-[var(--pemali-text-muted)] bg-[var(--pemali-surface)]"
                 : "border-zinc-700 text-zinc-600"
             }`}>
               {statusLabel}
@@ -447,14 +485,16 @@ function WorkflowNode({ agentId, title, subtitle, status, icon, toolName }: {
         </div>
       </div>
 
-      {/* Connector Dot */}
-      <div className={`absolute top-1/2 left-[-12px] md:left-1/2 md:-translate-x-1/2 w-3 h-3 rounded-full border-2 border-[var(--pemali-bg)] z-30 transition-all duration-700 hidden md:block ${
-        isRunning
-          ? "bg-[var(--pemali-accent)] scale-150 shadow-lg shadow-[var(--pemali-accent)]/50"
-          : isDone
-          ? "bg-emerald-500"
-          : "bg-[var(--pemali-border)]"
-      }`} />
+      {/* Connector Dot — hanya muncul kalo gak ada ConnectorLine di atasnya */}
+      {isRunning && (
+        <div className={`absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full border-2 border-[var(--pemali-bg)] z-30 transition-all duration-700 ${
+          isRunning
+            ? "bg-[var(--pemali-accent)] shadow shadow-[var(--pemali-accent)]/50 animate-pulse"
+            : isDone
+            ? "bg-emerald-500"
+            : "bg-[var(--pemali-border)]"
+        }`} />
+      )}
     </motion.div>
   );
 }
@@ -487,7 +527,7 @@ export function FinalReport({ content, isLoading }: { content: string; isLoading
           <div>
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 rounded-full bg-[var(--pemali-accent)] flex items-center justify-center text-white">
-                <img src="/logo.png" alt="PEMALI" className="w-6 h-6 object-contain" />
+                <img src="/images/logo.png" alt="PEMALI" className="w-6 h-6 object-contain" />
               </div>
               <div className="text-[11px] font-bold text-[var(--pemali-accent)] uppercase tracking-[0.3em]">Laporan Audit Lingkungan</div>
             </div>

@@ -163,3 +163,20 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Horizontal scan-line sweep for hero radar overlay — bottom to top */
+@keyframes pemali-scanline {
+  0%   { bottom: 10%; opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { bottom: 90%; opacity: 0; }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}

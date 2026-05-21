@@ -2,6 +2,7 @@
 
 /* Direction: Anthropic Terminal — Real-time Agent Thinking Stream */
 
+import Image from "next/image";
 import { useEffect, useRef, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTelemetryStore, type AgentPhase } from "@/stores/telemetryStore";
@@ -133,14 +134,13 @@ export default function AgentThinkingStream({
                 : meta.label}
             </span>
             {isTyping && phase === "reasoning" && (
-              <span className="relative flex h-1.5 w-1.5 ml-0.5">
-                <span
-                  className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
-                  style={{ backgroundColor: meta.color }}
-                />
-                <span
-                  className="relative inline-flex rounded-full h-1.5 w-1.5"
-                  style={{ backgroundColor: meta.color }}
+              <span className="relative inline-block w-3.5 h-3.5 ml-1">
+                <Image
+                  src="/images/logo.png"
+                  alt=""
+                  width={14}
+                  height={14}
+                  className="object-contain animate-spin-slow opacity-70"
                 />
               </span>
             )}
@@ -191,14 +191,13 @@ export default function AgentThinkingStream({
           </div>
         ) : (
           <div className="flex items-center gap-2 text-[12px] text-[var(--pemali-text-muted)] font-mono">
-            <span className="relative flex h-2 w-2">
-              <span
-                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-40"
-                style={{ backgroundColor: meta.color }}
-              />
-              <span
-                className="relative inline-flex rounded-full h-2 w-2"
-                style={{ backgroundColor: meta.color }}
+            <span className="relative inline-block w-4 h-4">
+              <Image
+                src="/images/logo.png"
+                alt=""
+                width={16}
+                height={16}
+                className="object-contain animate-spin-slow opacity-50"
               />
             </span>
             <span>{agentName} sedang menganalisis...</span>

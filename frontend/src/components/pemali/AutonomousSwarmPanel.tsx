@@ -6,26 +6,33 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useTelemetryStore } from "@/stores/telemetryStore";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // ─── Anthropic palette ───
 const A = {
-  bg: "#F5F4EF",
-  surface: "#EDEBE4",
-  surfaceHover: "#E5E2DA",
+  bg: "#FFFFFF",
+  surface: "#F1EFE8",
+  surfaceHover: "#E8E6DC",
   text: "#1A1916",
-  text2: "#5E5A54",
-  text3: "#7A7670",
-  accent: "#C8A882",
+  text2: "#5F5E5A",
+  text3: "#888780",
+  accent: "#8B5CF6",
   border: "rgba(26,25,22,0.08)",
-  thinking: "#9B8EC4",
-  executing: "#6B9E7A",
-  done: "#8B9D83",
-  error: "#C47E6E",
+  thinking: "#8B5CF6",
+  executing: "#10B981",
+  done: "#10B981",
+  error: "#EF4444",
 };
 
 // ─── Types ───
 interface LaporanSummary {
   id: number; title: string; priority: number; location: string;
+  metadata: Record<string, unknown> | null; created_at: string;
+}
+interface ReportDetail {
+  id: number; session_id: string; source: "autonomous" | "user"; title: string; location: string;
+  issue_type: string; priority: number; narrative_report: string; thk_alignment: Record<string, string> | null;
   metadata: Record<string, unknown> | null; created_at: string;
 }
 interface TaskResponse { total: number; tasks: Array<{ id: number; task_type: string; priority: number; intent_description: string; execute_at: string; status: string; retries: number; last_error: string | null; created_at: string; }>; }
@@ -35,7 +42,7 @@ interface CaseItem { case_id: string; title: string; priority: number; intent: s
 interface EvaluationData { was_decision_correct?: boolean; strategy_adjustments?: string; confidence?: number; is_first_cycle?: boolean; evaluation_failed?: boolean; }
 interface ScanSummary { weather?: { avg_temp: number; max_temp: number }; fire_hotspots?: { count: number; status: string }; earthquakes?: { count_24h: number; max_mag: number }; air_quality?: { worst_aqi: number; worst_location: string }; }
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://10.10.20.254:8000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
 const POLL_INTERVAL = 10000;
 
 const fmtDate = (iso: string) => {
@@ -65,6 +72,10 @@ export default function AutonomousSwarmPanel() {
   const sseConnected = useTelemetryStore((s) => s.isConnected);
 
   const [lastReport, setLastReport] = useState<LaporanSummary | null>(null);
+  const [lastReportDetail, setLastReportDetail] = useState<ReportDetail | null>(null);
+  const [showReportDetail, setShowReportDetail] = useState(false);
+  const [justTriggered, setJustTriggered] = useState(false);
+  const [activeTab, setActiveTab] = useState<"live" | "history">("live");
   const [history, setHistory] = useState<LaporanSummary[]>([]);
   const [pendingTask, setPendingTask] = useState<{ id: number; execute_at: string } | null>(null);
   const [runningTask, setRunningTask] = useState<{ id: number } | null>(null);
@@ -75,10 +86,28 @@ export default function AutonomousSwarmPanel() {
   const otakEvents = useMemo(() => events.filter((e) => e.node_id === "agent_otak"), [events]);
   const latestOtak = otakEvents[otakEvents.length - 1];
   const isLive = useMemo(() => {
+    if (isStarting) return true;
+    if (justTriggered) return true;
     if (latestOtak && latestOtak.state !== "DONE" && latestOtak.state !== "ERROR") return true;
-    if (!sseConnected && runningTask) return true;
+    if (runningTask) return true;
     return false;
-  }, [latestOtak, sseConnected, runningTask]);
+  }, [latestOtak, runningTask, justTriggered, isStarting]);
+
+  const showLiveContent = useMemo(() => isLive && activeTab === "live", [isLive, activeTab]);
+
+  // Reset tab to live when isLive becomes false
+  useEffect(() => {
+    if (!isLive) {
+      setActiveTab("live");
+    }
+  }, [isLive]);
+
+  // Clear justTriggered as soon as we receive live events
+  useEffect(() => {
+    if (latestOtak) {
+      setJustTriggered(false);
+    }
+  }, [latestOtak]);
 
   const planEvent = useMemo(() => {
     for (let i = events.length - 1; i >= 0; i--) {
@@ -118,7 +147,17 @@ export default function AutonomousSwarmPanel() {
         fetch(`${BACKEND}/api/tasks?status=pending&type=autonomous&limit=1`),
         fetch(`${BACKEND}/api/tasks?status=running&type=autonomous`),
       ]);
-      if (lr.ok) { const d: LaporanListResponse = await lr.json(); setLastReport(d.reports[0] || null); }
+      if (lr.ok) {
+        const d: LaporanListResponse = await lr.json();
+        setLastReport(d.reports[0] || null);
+        if (d.reports[0]) {
+          const detailRes = await fetch(`${BACKEND}/api/laporan/${d.reports[0].id}`);
+          if (detailRes.ok) {
+            const detailData = await detailRes.json();
+            setLastReportDetail(detailData);
+          }
+        }
+      }
       if (tp.ok) { const d: TaskResponse = await tp.json(); setPendingTask(d.tasks[0] ? { id: d.tasks[0].id, execute_at: d.tasks[0].execute_at } : null); }
       if (tr.ok) { const d: TaskResponse = await tr.json(); setRunningTask(d.tasks[0] ? { id: d.tasks[0].id } : null); }
       const hr = await fetch(`${BACKEND}/api/laporan?source=autonomous&limit=10`);
@@ -136,6 +175,8 @@ export default function AutonomousSwarmPanel() {
         body: JSON.stringify({ task_type: "autonomous", priority: 9, intent_description: "Mulai siklus pemantauan lingkungan Bali secara otonom" }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setJustTriggered(true);
+      setTimeout(() => setJustTriggered(false), 20000); // auto-expire after 20s
       await fetchData();
     } catch (err: unknown) {
       setApiError(err instanceof Error ? err.message : "Gagal memulai siklus");
@@ -184,35 +225,58 @@ export default function AutonomousSwarmPanel() {
       </AnimatePresence>
 
       {/* Status bar */}
-      <div className="flex-shrink-0 mb-2">
-        <div className="flex items-center gap-3 flex-wrap" style={{ fontFamily: "var(--font-geist-mono), monospace", fontSize: "11px" }}>
+      <div className="flex-shrink-0 mb-3 px-1">
+        <div className="flex items-center gap-3 flex-wrap font-mono text-[10px]" style={{ color: A.text3 }}>
           <motion.span
-            className="w-2 h-2 rounded-full flex-shrink-0"
-            style={{ backgroundColor: stateColor(latestOtak?.state || "IDLE") }}
+            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: stateColor(isLive ? (latestOtak?.state || "THINKING") : "IDLE") }}
             animate={isLive ? { opacity: [0.4, 1, 0.4] } : {}}
             transition={{ duration: 1.6, repeat: isLive ? Infinity : 0, ease: "easeInOut" }}
           />
-          <span className="font-medium" style={{ color: A.text }}>
-            {runningTask ? `#${runningTask.id}` : "Agent Otak"}
+          <span className="font-semibold uppercase tracking-wider text-[11px]" style={{ color: A.text }}>
+            {isLive ? `Siklus Aktif #${runningTask?.id || pendingTask?.id || ""}` : "Siklus Otonom"}
           </span>
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-            style={{ background: `${stateColor(latestOtak?.state || "IDLE")}15`, color: stateColor(latestOtak?.state || "IDLE") }}
-          >{latestOtak?.state || "IDLE"}</span>
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider"
+            style={{ background: `${stateColor(isLive ? (latestOtak?.state || "THINKING") : "IDLE")}15`, color: stateColor(isLive ? (latestOtak?.state || "THINKING") : "IDLE") }}
+          >
+            {isLive ? (latestOtak?.state || "INITIALIZING") : "Ready / Siap"}
+          </span>
           {latestOtak?.metadata?.phase && (
-            <span style={{ color: A.text3 }}>{latestOtak.metadata.phase as string}</span>
+            <span className="uppercase" style={{ color: A.text2 }}>Phase: {latestOtak.metadata.phase as string}</span>
           )}
-          <span className="ml-auto flex items-center gap-1" style={{ color: A.text3 }}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sseConnected ? A.done : A.error }} />
-            {sseConnected ? "live" : "off"}
+          <span className="ml-auto flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: sseConnected ? A.done : A.error }} />
+            <span>REAL-TIME TELEMETRY</span>
           </span>
-          <span style={{ color: A.text3 }}>{subAgentEvents.length} events</span>
-          {(evaluation?.confidence ?? latestOtak?.metadata?.confidence) != null && (
-            <span className="tabular-nums" style={{ color: A.text3 }}>
-              conf {(evaluation?.confidence ?? latestOtak?.metadata?.confidence) as number}/10
-            </span>
-          )}
         </div>
       </div>
+
+      {isLive && (
+        <div className="flex justify-end gap-1.5 mb-3 px-1 flex-shrink-0">
+          <button
+            onClick={() => setActiveTab("live")}
+            className="px-2.5 py-1 text-[9px] uppercase font-mono tracking-wider font-semibold rounded transition-all duration-200"
+            style={{
+              background: activeTab === "live" ? A.text : "transparent",
+              color: activeTab === "live" ? A.bg : A.text2,
+              border: `1.5px solid ${activeTab === "live" ? A.text : "rgba(26,25,22,0.12)"}`
+            }}
+          >
+            ● Live Monitor
+          </button>
+          <button
+            onClick={() => setActiveTab("history")}
+            className="px-2.5 py-1 text-[9px] uppercase font-mono tracking-wider font-semibold rounded transition-all duration-200"
+            style={{
+              background: activeTab === "history" ? A.text : "transparent",
+              color: activeTab === "history" ? A.bg : A.text2,
+              border: `1.5px solid ${activeTab === "history" ? A.text : "rgba(26,25,22,0.12)"}`
+            }}
+          >
+            Laporan & Histori
+          </button>
+        </div>
+      )}
 
       {/* Hairline */}
       <div className="flex-shrink-0" style={{ height: "1px", background: A.border }} />
@@ -221,8 +285,61 @@ export default function AutonomousSwarmPanel() {
       <div className="flex-1 flex min-h-0 pt-2.5" style={{ overflow: "hidden", gap: "24px" }}>
         {/* LEFT */}
         <div className="flex-1 flex flex-col min-h-0" style={{ gap: "10px", overflow: "hidden" }}>
-          {isLive ? (
+          {showLiveContent ? (
             <>
+              {/* ── Swarm Live Audit Track ── */}
+              <div className="flex-shrink-0 rounded p-4 mb-3 border relative overflow-hidden" style={{ background: A.surface, borderColor: A.border }}>
+                <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-[#8B5CF6]/40 to-transparent animate-[pulse_2s_infinite]" />
+                
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="relative w-3.5 h-3.5 flex items-center justify-center">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-[#8B5CF6]/30 animate-ping" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-[#8B5CF6]" />
+                  </div>
+                  <div>
+                    <h4 className="text-[12px] font-semibold" style={{ color: A.text }}>Pemali Swarm: Active Environmental Audit</h4>
+                    <p className="text-[9px]" style={{ color: A.text3 }}>Multi-agent execution & logical inference routing</p>
+                  </div>
+                  <span className="ml-auto text-[9px] font-mono bg-black/[0.04] px-1.5 py-0.5 rounded uppercase" style={{ color: A.text2 }}>
+                    {latestOtak?.state || "RUNNING"}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 mt-2 font-mono text-[10px]">
+                  {[
+                    { label: "Inisialisasi Swarm & Database Connection Pool", check: true },
+                    { label: "Manager Agent: Menganalisis kondisi anomali satelit & cuaca", check: latestOtak?.state !== "SPAWNING" },
+                    { label: "Membagi kasus prioritas dan menyusun Directed Acyclic Graph (DAG)", check: planCases.length > 0 },
+                    { label: "Spawning sub-agents spesialisasi (OSINT, Geo, Fire, Seismic)", check: agentRuns.length > 0 },
+                    { label: "Menyelesaikan laporan audit & sinkronisasi RAG memory", check: latestOtak?.state === "DONE" }
+                  ].map((step, idx) => {
+                    const active = idx === 0 ? true : 
+                                   idx === 1 ? latestOtak?.state === "THINKING" || planCases.length > 0 :
+                                   idx === 2 ? planCases.length > 0 :
+                                   idx === 3 ? agentRuns.length > 0 :
+                                   latestOtak?.state === "DONE";
+                    const done = step.check;
+                    return (
+                      <div key={idx} className="flex items-center gap-2 py-0.5 transition-opacity duration-300" style={{ opacity: active || done ? 1 : 0.35 }}>
+                        <span className="flex-shrink-0 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold"
+                          style={{
+                            background: done ? `${A.done}18` : active ? `${A.thinking}18` : "rgba(26,25,22,0.04)",
+                            color: done ? A.done : active ? A.thinking : A.text3,
+                            border: `1px solid ${done ? `${A.done}30` : active ? `${A.thinking}30` : "transparent"}`
+                          }}
+                        >
+                          {done ? "✓" : active ? "●" : idx + 1}
+                        </span>
+                        <span className="flex-1 truncate" style={{ color: done ? A.text : active ? A.text : A.text3 }}>{step.label}</span>
+                        {active && !done && (
+                          <span className="text-[9px] animate-pulse" style={{ color: A.thinking }}>running...</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* ── LIVE: Scan metrics ── */}
               {scanTiles.length > 0 && (
                 <div className="flex-shrink-0">
@@ -326,10 +443,73 @@ export default function AutonomousSwarmPanel() {
                 </div>
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>
                   {lastReport ? (
-                    <p className="text-[14px] leading-relaxed mb-2" style={{ color: A.text }}>
-                      {lastReport.title || "Laporan"} <span style={{ color: A.text3 }}>&middot;</span> P:{lastReport.priority}
-                      {lastReport.location ? <> <span style={{ color: A.text3 }}>&middot;</span> {lastReport.location}</> : null}
-                    </p>
+                    <>
+                      <p className="text-[14px] leading-relaxed mb-2" style={{ color: A.text }}>
+                        {lastReport.title || "Laporan"} <span style={{ color: A.text3 }}>&middot;</span> <span className="text-[11px] font-mono px-1.5 py-0.5 rounded" style={{ background: lastReport.priority >= 8 ? `${A.error}15` : `${A.accent}15`, color: lastReport.priority >= 8 ? A.error : A.accent }}>{lastReport.priority >= 8 ? "Prioritas Kritis" : lastReport.priority >= 5 ? "Prioritas Tinggi" : "Rutin"}</span>
+                        {lastReport.location ? <> <span style={{ color: A.text3 }}>&middot;</span> {lastReport.location}</> : null}
+                      </p>
+
+                      {lastReportDetail && (
+                        <div className="mt-2 flex flex-col gap-1.5 mb-3">
+                          <button
+                            onClick={() => setShowReportDetail(!showReportDetail)}
+                            className="text-[10px] uppercase font-mono tracking-wider font-semibold text-[#8B5CF6] hover:underline text-left inline-flex items-center gap-1.5"
+                          >
+                            <span>{showReportDetail ? "↓ Sembunyikan Laporan" : "→ Lihat Hasil Laporan Otonom"}</span>
+                          </button>
+                          
+                          <AnimatePresence>
+                            {showReportDetail && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
+                                transition={{ duration: 0.2, ease: "easeOut" }}
+                                className="mt-1.5"
+                              >
+                                <div className="p-4 rounded-xl border max-h-[300px] overflow-y-auto leading-relaxed text-[12px] font-sans prose prose-neutral max-w-none"
+                                  style={{
+                                    background: "#FCFAF6",
+                                    borderColor: "rgba(26,25,22,0.06)",
+                                    color: "#1A1916",
+                                    boxShadow: "inset 0 2px 8px rgba(0,0,0,0.015)"
+                                  }}
+                                >
+                                  <div className="flex items-center justify-between pb-2 mb-3 border-b border-[rgba(26,25,22,0.06)] font-mono text-[9px] uppercase tracking-wider text-[#888780]">
+                                    <span>Hasil Sintesis Swarm</span>
+                                    <span>{fmtDate(lastReportDetail.created_at)}</span>
+                                  </div>
+                                  <h3 className="font-serif text-[18px] font-semibold mb-2 text-[#1A1916]">
+                                    {lastReportDetail.title}
+                                  </h3>
+                                  <div className="space-y-3 prose-p:leading-relaxed prose-headings:font-serif">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                      {lastReportDetail.narrative_report}
+                                    </ReactMarkdown>
+                                  </div>
+                                  
+                                  {lastReportDetail.thk_alignment && (
+                                    <div className="mt-4 pt-3 border-t border-[rgba(26,25,22,0.06)]">
+                                      <div className="font-mono text-[9px] uppercase tracking-wider text-[#888780] mb-2 font-semibold">
+                                        Penyelarasan Tri Hita Karana (THK):
+                                      </div>
+                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 font-mono text-[10px]">
+                                        {Object.entries(lastReportDetail.thk_alignment).map(([k, v]) => (
+                                          <div key={k} className="p-2 rounded bg-black/[0.02] border border-black/[0.03]">
+                                            <span className="font-semibold uppercase block mb-0.5 text-[#8B5CF6] text-[8px] tracking-wider">{k}</span>
+                                            <span className="text-[10px] text-[#5F5E5A] leading-snug">{v}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <p className="text-[14px] mb-2" style={{ color: A.text3 }}>Belum ada siklus autonomous.</p>
                   )}
@@ -347,7 +527,7 @@ export default function AutonomousSwarmPanel() {
                       fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
                       opacity: isStarting ? 0.5 : 1, cursor: isStarting ? "wait" : "pointer",
                     }}
-                  >{isStarting ? "Starting..." : "Start Cycle"}</button>
+                  >{isStarting ? "Memulai..." : "Mulai Audit Agent"}</button>
                 </motion.div>
               </div>
 
@@ -356,10 +536,15 @@ export default function AutonomousSwarmPanel() {
 
               {/* ── IDLE: History (scrollable) ── */}
               <div className="flex-1 min-h-0 flex flex-col">
-                <div className="flex items-baseline gap-2 mb-1.5 flex-shrink-0" style={{ fontFamily: "var(--font-geist-mono), monospace" }}>
+                <div className="flex items-center gap-2 mb-1.5 flex-shrink-0" style={{ fontFamily: "var(--font-geist-mono), monospace" }}>
                   <span className="text-[10px] tracking-wider" style={{ color: A.text3 }}>02</span>
                   <span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: A.text3 }}>History</span>
-                  <span className="text-[10px] ml-auto" style={{ color: A.text3 }}>{history.length} reports</span>
+                  <button
+                    onClick={() => router.push("/laporan")}
+                    className="text-[10px] ml-auto hover:underline font-mono uppercase tracking-wider text-[#8B5CF6] font-semibold"
+                  >
+                    Lihat Semua Laporan →
+                  </button>
                 </div>
                 {history.length > 0 ? (
                   <div className="flex-1 overflow-y-auto min-h-0 rounded" style={{ background: A.surface, border: `1px solid ${A.border}` }}>
@@ -370,7 +555,7 @@ export default function AutonomousSwarmPanel() {
                         className="w-full text-left px-3 py-1.5 flex items-center gap-3 group"
                         style={{ background: "transparent", borderBottom: i < Math.min(history.length, 14) - 1 ? `1px solid ${A.border}` : "none" }}
                       >
-                        <span className="text-[9px] font-mono w-5 flex-shrink-0" style={{ color: A.text3 }}>#{r.id}</span>
+                        <span className="text-[9px] font-mono w-5 flex-shrink-0" style={{ color: A.text3 }}>{String(history.length - i).padStart(2, "0")}</span>
                         <span className="text-[12px] flex-1 truncate" style={{ color: A.text }}>{r.title || "Laporan"}</span>
                         <span className="text-[9px] font-mono flex-shrink-0" style={{ color: A.text3 }}>{fmtDate(r.created_at)}</span>
                       </button>
@@ -385,44 +570,37 @@ export default function AutonomousSwarmPanel() {
         </div>
 
         {/* RIGHT sidebar */}
-        <div className="w-[260px] flex-shrink-0 flex flex-col min-h-0" style={{ gap: "10px" }}>
-          {/* System status card */}
-          <div className="flex-shrink-0 rounded p-3" style={{ background: A.surface, border: `1px solid ${A.border}` }}>
-            <div className="flex items-baseline gap-2 mb-1.5" style={{ fontFamily: "var(--font-geist-mono), monospace" }}>
-              <span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: A.text3 }}>System</span>
-              <span className="ml-auto flex items-center gap-1.5 text-[10px]" style={{ color: A.text3 }}>
+        <div className="w-[260px] flex-shrink-0 flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 flex flex-col rounded" style={{ background: A.surface, border: `1px solid ${A.border}`, overflow: "hidden" }}>
+            <div className="flex-shrink-0 px-3 py-2 border-b" style={{ borderColor: A.border, background: A.surface }}>
+              <div className="flex items-center gap-1.5 font-mono text-[9px]" style={{ color: A.text3 }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sseConnected ? A.done : A.error }} />
-                {sseConnected ? "connected" : "offline"}
-              </span>
+                <span>TELEMETRY STREAM</span>
+                <span className="ml-auto uppercase tracking-wider">{sseConnected ? "Active" : "Offline"}</span>
+              </div>
             </div>
-            <div className="flex gap-4 text-[11px]" style={{ color: A.text2 }}>
-              <span>{subAgentEvents.length} events</span>
-              <span>{agentNames.length} participants</span>
-            </div>
-            {agentNames.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {agentNames.slice(0, 4).map(n => (
-                  <span key={n} className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: `${A.accent}15`, color: A.accent }}>{n}</span>
+            {subAgentEvents.length > 0 ? (
+              <div className="flex-1 overflow-y-auto min-h-0 divide-y divide-[rgba(26,25,22,0.06)]">
+                {subAgentEvents.slice(-30).reverse().map((e, i) => (
+                  <div key={i} className="px-3 py-2 hover:bg-black/[0.01] transition-colors">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: stateColor(e.state) }} />
+                      <span className="text-[9px] font-mono uppercase font-semibold" style={{ color: stateColor(e.state) }}>{e.state}</span>
+                      <span className="text-[9px] font-mono ml-auto" style={{ color: A.text3 }}>{e.node_id}</span>
+                    </div>
+                    {e.narrative && <p className="text-[10px] mt-1 leading-relaxed" style={{ color: A.text2 }}>{e.narrative}</p>}
+                  </div>
                 ))}
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+                <span className="text-[20px] mb-2">👁️‍🗨️</span>
+                <p className="text-[11px] leading-relaxed max-w-[180px]" style={{ color: A.text3 }}>
+                  Belum ada aktivitas otonom terdeteksi. Mulai audit untuk melihat telemetry stream.
+                </p>
               </div>
             )}
           </div>
-
-          {/* Events feed (scrollable) */}
-          {subAgentEvents.length > 0 && (
-            <div className="flex-1 min-h-0 overflow-y-auto rounded" style={{ background: A.surface, border: `1px solid ${A.border}` }}>
-              {subAgentEvents.slice(-20).reverse().map((e, i) => (
-                <div key={i} className="px-2.5 py-1.5" style={{ borderBottom: i < Math.min(subAgentEvents.length, 20) - 1 ? `1px solid ${A.border}` : "none" }}>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: stateColor(e.state) }} />
-                    <span className="text-[9px] font-mono uppercase" style={{ color: A.text3 }}>{e.state}</span>
-                    <span className="text-[9px] font-mono ml-auto truncate max-w-[100px]" style={{ color: A.text3 }}>{e.node_id}</span>
-                  </div>
-                  {e.narrative && <p className="text-[10px] mt-0.5 leading-relaxed" style={{ color: A.text2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{e.narrative}</p>}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </div>

@@ -15,7 +15,8 @@ from backend.core.memory_processor import TemporalPatternExtractor, KnowledgeGra
 from backend.core.models import MasterPlan, TaskIntent, TelemetryEvent, NodeState, ErrorResponse
 from backend.core.telemetry import telemetry
 from backend.core.registry import registry
-from backend.core.llm_client import get_llm_client
+from backend.core.llm_client import get_llm_client, rate_limit_wait
+from backend.core.session_logger import SessionLogger
 
 logger = logging.getLogger("PEMALI.Orchestrator")
 
@@ -156,16 +157,55 @@ async def execute_subagent_with_safety(sub_agent: "SubAgent", trace_id: str, tim
         ).model_dump()
 
 
-_IMAGE_URL_RE = re.compile(r'(https?://[^\s"\']+\.(?:png|jpg|jpeg|gif|webp|svg))', re.IGNORECASE)
+_IMAGE_RE = re.compile(
+    r'(?:'
+    r'https?://[^\s"\']+\.(?:png|jpg|jpeg|gif|webp|svg|bmp|ico)'  # absolute URL
+    r'|'
+    r'!\[.*?\]\(.*?\)'  # markdown image: ![alt](url)
+    r'|'
+    r'(?:\./)?[\w\-./]+\.(?:png|jpg|jpeg|gif|webp|svg|bmp|ico)'  # relative path
+    r'|'
+    r'data:image/[a-z+]+;base64,[^\s"\']+'  # data URI
+    r'|'
+    r'<img\s[^>]*src="[^"]*"[^>]*/?>'  # HTML img tag
+    r'|'
+    r'Cannot read ["\']?image\.png["\']?'  # specific LLM error message
+    r'|'
+    r'this model does not support image input'  # model error response
+    r')',
+    re.IGNORECASE
+)
 
 def _strip_image_urls(data: dict | list | str) -> dict | list | str:
     if isinstance(data, dict):
         return {k: _strip_image_urls(v) for k, v in data.items()}
     if isinstance(data, list):
         return [_strip_image_urls(v) for v in data]
-    if isinstance(data, str) and _IMAGE_URL_RE.search(data):
-        return _IMAGE_URL_RE.sub('[image]', data)
+    if isinstance(data, str) and _IMAGE_RE.search(data):
+        return _IMAGE_RE.sub('[image]', data)
     return data
+
+
+def _sanitize_output(text: str) -> str:
+    """Filter output dari LLM — strip error & image references sebelum dikirim ke user."""
+    text = _strip_image_urls(text)
+    # Nuclear filter: spesifik error pattern yg pernah muncul
+    text = re.sub(
+        r'ERROR:\s*Cannot read.*?does not support image input.*?Inform the user\..*',
+        '[Sistem: Respon mengandung error LLM yang telah difilter]',
+        text, flags=re.IGNORECASE | re.DOTALL
+    )
+    return text
+
+
+def _sanitize_messages(messages: List[Dict]) -> List[Dict]:
+    """Sanitize all messages before LLM call — strip image references."""
+    serialized_before = json.dumps(messages, default=str, ensure_ascii=False)
+    sanitized = _strip_image_urls(messages)
+    serialized_after = json.dumps(sanitized, default=str, ensure_ascii=False)
+    if serialized_before != serialized_after:
+        logger.warning(f"[Sanitizer] Image references stripped: {serialized_before[:200]} -> {serialized_after[:200]}")
+    return sanitized
 
 
 class SubAgent:
@@ -209,12 +249,16 @@ class SubAgent:
                 "timestamp": int(time.time())
             })
 
+        messages = _sanitize_messages(messages)
+        logger.info(f"[SubAgent] LLM call: model={OPENROUTER_MODEL} msgs={len(messages)} tools={len(self.tools) if self.tools else 0}")
+        await rate_limit_wait()
         stream = await llm.chat.completions.create(
             model=OPENROUTER_MODEL,
             messages=messages,
             tools=self.tools if self.tools else None,
             tool_choice="auto" if self.tools else None,
             stream=True,
+            max_tokens=4096,
             timeout=180.0,
         )
 
@@ -308,6 +352,7 @@ class SubAgent:
             "Kalau tidak ada tools, narasikan saja — jangan paksa bikin JSON."
         )
 
+        system_prompt = _strip_image_urls(system_prompt)
         messages = [{"role": "system", "content": system_prompt}]
 
         for attempt in range(self.max_retries):
@@ -334,11 +379,14 @@ class SubAgent:
                 else:
                     logger.info(f"[SubAgent] Calling LLM non-streaming (attempt {attempt+1}/{self.max_retries})")
                     llm = get_llm_client()
+                    messages = _sanitize_messages(messages)
+                    await rate_limit_wait()
                     res = await llm.chat.completions.create(
                         model=OPENROUTER_MODEL,
                         messages=messages,
                         tools=self.tools if self.tools else None,
                         tool_choice="auto" if self.tools else None,
+                        max_tokens=4096,
                         timeout=60.0,
                     )
                     ai_msg_raw = res.choices[0].message
@@ -411,7 +459,7 @@ class SubAgent:
                     state=NodeState.THINKING, narrative=llm_narrative or f"Menganalisis instruksi: {self.task.intent}..."
                 ))
 
-                messages.append(ai_msg)
+                messages.append(_strip_image_urls(ai_msg))
 
                 if ai_msg.get("tool_calls"):
                     tool_names = [tc["function"]["name"] for tc in ai_msg["tool_calls"]]
@@ -838,56 +886,77 @@ class PemaliOrchestrator:
                 f"{mem_part}"
                 f"{rag_part}{graph_part}"
             )
-            plan_user_prompt = f"Kasus yang harus diaudit:\n{prompt}"
+            sys_prompt = _strip_image_urls(sys_prompt)
+            plan_user_prompt = _strip_image_urls(f"Kasus yang harus diaudit:\n{prompt}")
         else:
             sys_prompt = (
                 "[PEMALI NARRATIVE CONTRACT v1]\n"
-                "Anda adalah MANAGER AGENT dalam sistem audit lingkungan Bali.\n"
-                "Tugas Anda: analisis permintaan user, dekomposisi menjadi sub-tugas terstruktur, delegasikan ke Sub-Agent yang sesuai, lalu sintesis hasilnya.\n\n"
+                "Anda adalah MANAGER AGENT dalam sistem audit lingkungan Bali.\n\n"
+
+                "# GATE LOGIC — PILIH SALAH SATU:\n"
+                "---\n"
+                "JALUR A — PERCAKAPAN BIASA:\n"
+                "Gunakan jika user hanya: salam, sapaan, tanya kabar, obrolan ringan, atau pertanyaan umum.\n"
+                "→ JAWAB LANGSUNG dengan narasi natural. JANGAN panggil tool apapun.\n"
+                "→ JANGAN gunakan create_audit_plan. JANGAN spawn SubAgent.\n"
+                "→ Cukup balas seperti asisten biasa.\n"
+                "---\n"
+                "JALUR B — PERMINTAAN AUDIT:\n"
+                "Gunakan jika user meminta: data lingkungan, investigasi, audit kawasan, analisis Bali, "
+                "informasi spesifik tentang cuaca/air/kebakaran/laut/polusi.\n"
+                "→ Narasikan dulu analisis audit dalam bahasa Indonesia.\n"
+                "→ Setelah narasi, panggil tool create_audit_plan dengan task terstruktur.\n"
+                "---\n\n"
 
                 f"{tool_context}\n\n"
 
-                "# GATE LOGIC (evaluasi dulu sebelum bertindak)\n"
-                "Apakah ini PERMINTAAN AUDIT LINGKUNGAN atau SEKADAR PERCAKAPAN BIASA?\n"
-                "- Jika hanya salam, sapaan, tanya kabar, atau obrolan ringan → JAWAB LANGSUNG tanpa tool.\n"
-                "- Jika user meminta data, investigasi, audit kawasan, analisis lingkungan, atau informasi spesifik Bali → gunakan tool create_audit_plan.\n"
-                "Jangan spawn SubAgent untuk percakapan ringan — itu buang sumber daya.\n\n"
-
-                "# ATURAN NARASI\n"
-                "SEBELUM membuat plan, narasikan dulu dalam bahasa Indonesia:\n"
-                "- Area audit apa yang kamu identifikasi dari permintaan user\n"
-                "- Mengapa area tersebut prioritas untuk diaudit\n"
-                "- Agent mana yang paling cocok dan mengapa\n"
-                "Narasi akan ditampilkan ke user — ceritakan proses berpikirmu.\n\n"
-
-                "# FORMAT OUTPUT\n"
-                "Setelah narasi, gunakan tool create_audit_plan untuk output rencana terstruktur.\n"
                 "Agent yang tersedia: geo_agent, water_agent, fire_agent, osint_agent, scheduler_agent\n"
                 "depends_on untuk urutan DAG — task tanpa dependency dikerjakan paralel.\n"
                 "PENTING: hanya assign task yang sesuai dengan tools yang tersedia di atas."
                 f"{rag_part}{graph_part}"
             )
-            plan_user_prompt = prompt
+            sys_prompt = _strip_image_urls(sys_prompt)
+            plan_user_prompt = _strip_image_urls(prompt)
 
         stream_queue = stream_queue_var.get()
         # Retry up to 2x untuk plan generation
         plan = None
         manager_narrative = ""
+        last_error = ""
         for attempt in range(3):
             try:
-                logger.info(f"[Manager] Calling LLM for plan generation (attempt {attempt+1})")
+                logger.info(f"[Manager] Calling LLM for plan generation (attempt {attempt+1}) model={OPENROUTER_MODEL}")
                 llm = get_llm_client()
+                await rate_limit_wait()
+
+                msgs = _sanitize_messages([
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": plan_user_prompt}
+                ])
+                if last_error and attempt > 0:
+                    msgs.append({
+                        "role": "user",
+                        "content": (
+                            f"Perbaiki format JSON. Error sebelumnya:\n{last_error}\n\n"
+                            "WAJIB gunakan format create_audit_plan dengan field 'tasks' "
+                            "yang berisi array of objects, masing-masing dengan: "
+                            "task_id, target_agent (pilih dari: geo_agent, water_agent, fire_agent, osint_agent), "
+                            "intent, depends_on (array string)."
+                        )
+                    })
+
                 if stream_queue is not None:
                     # Streaming: dapatkan narasi + plan dalam satu call
                     stream = await llm.chat.completions.create(
                         model=OPENROUTER_MODEL,
-                        messages=[
+                        messages=_sanitize_messages([
                             {"role": "system", "content": sys_prompt},
                             {"role": "user", "content": plan_user_prompt}
-                        ],
+                        ]),
                         tools=[PLAN_TOOL],
                         tool_choice="auto",
                         stream=True,
+                        max_tokens=4096,
                         timeout=60.0,
                     )
                     content = ""
@@ -912,12 +981,13 @@ class PemaliOrchestrator:
                 else:
                     res = await llm.chat.completions.create(
                         model=OPENROUTER_MODEL,
-                        messages=[
+                        messages=_sanitize_messages([
                             {"role": "system", "content": sys_prompt},
                             {"role": "user", "content": plan_user_prompt}
-                        ],
+                        ]),
                         tools=[PLAN_TOOL],
                         tool_choice="auto",
+                        max_tokens=4096,
                         timeout=60.0,
                     )
                     msg = res.choices[0].message
@@ -934,11 +1004,11 @@ class PemaliOrchestrator:
                     logger.info("[Manager] No plan generated — chat mode (greeting/general question)")
                     if manager_narrative:
                         await telemetry.emit(TelemetryEvent(
-                            trace_id=trace_id, node_id="manager", node_type="Manager",
+                            trace_id=trace_id, node_id="manager", node_type="Chat",
                             state=NodeState.DONE, narrative=manager_narrative,
                             metadata={"type": "chat_response"}
                         ))
-                    return manager_narrative or "Halo! Ada yang bisa saya bantu terkait audit lingkungan Bali?"
+                    return _sanitize_output(manager_narrative) or "Halo! Ada yang bisa saya bantu terkait audit lingkungan Bali?"
 
                 plan = MasterPlan(**json.loads(plan_raw))
                 plan.trace_id = trace_id
@@ -980,18 +1050,20 @@ class PemaliOrchestrator:
                 ))
                 break
             except Exception as e:
+                last_error = str(e)[:300]
+                logger.error(f"[Manager] Plan generation FAILED attempt {attempt+1}: {last_error}", exc_info=True)
                 if attempt < 2:
                     await telemetry.emit(TelemetryEvent(
                         trace_id=trace_id, node_id="manager", node_type="Manager",
-                        state=NodeState.ERROR, narrative=f"Plan retry {attempt+1}: {str(e)[:80]}"
+                        state=NodeState.ERROR, narrative=f"Plan retry {attempt+1}: {str(e)[:200]}"
                     ))
                     await asyncio.sleep(1)
                 else:
                     await telemetry.emit(TelemetryEvent(
                         trace_id=trace_id, node_id="manager", node_type="Manager",
-                        state=NodeState.ERROR, narrative=f"Plan Error setelah 3x percobaan: {e}"
+                        state=NodeState.ERROR, narrative=f"Plan Error: {str(e)[:300]}"
                     ))
-                    return f"Error: Gagal menyusun rencana setelah 3x percobaan."
+                    return f"Error: {str(e)[:500]}"
 
         if not plan:
             return "Error: Gagal menyusun rencana."
@@ -1056,16 +1128,23 @@ class PemaliOrchestrator:
                     }
                     logger.debug(f"[Manager] Injected shared_data for task {t.task_id}: dependencies={t.depends_on}")
 
-            coroutines = []
+            # Sequential execution to avoid free tier rate limits
+            results = []
             for t in ready_tasks:
                 scoped_manifests = get_scoped_manifests(t.target_agent, all_manifests)
                 tools = [{"type": "function", "function": m} for m in scoped_manifests]
                 logger.info(f"[Manager] Spawning SubAgent: {t.target_agent} for task {t.task_id}")
                 sub = SubAgent(t, self.session_id, tools, trace_id)
-                coroutines.append(execute_subagent_with_safety(sub, trace_id, timeout=45))
+                # Delay antar subagent buat hindarin rate limit
+                if results:
+                    await asyncio.sleep(4)
+                try:
+                    res = await execute_subagent_with_safety(sub, trace_id, timeout=45)
+                except Exception as exc:
+                    res = exc
+                results.append(res)
 
-            logger.debug(f"[Manager] Gathering {len(coroutines)} SubAgent results")
-            results = await asyncio.gather(*coroutines, return_exceptions=True)
+            logger.debug(f"[Manager] Gathered {len(results)} SubAgent results")
 
             for t, res in zip(ready_tasks, results):
                 if isinstance(res, Exception):
@@ -1147,6 +1226,9 @@ class PemaliOrchestrator:
 
         logger.info(f"[Manager] Synthesizing final report from {len(raw_results)} results")
 
+        # Delay buat hindarin rate limit dari subagent calls sebelumnya
+        await asyncio.sleep(3)
+
         # Siapkan hasil module dengan konteks — task ID di-anonymize, tapi tool_name + agent_hint tetap
         anon_successful = []
         for i, r in enumerate(raw_results):
@@ -1210,7 +1292,9 @@ class PemaliOrchestrator:
         )
         synth_payload = [
             {"role": "system", "content": synth_system},
-            {"role": "user", "content": f"Synthesize these audit results into a comprehensive report. Include a section about any failed tasks if present:\n{json.dumps(synth_input)}"}
+            {"role": "user", "content": _strip_image_urls(
+                f"Synthesize these audit results into a comprehensive report. Include a section about any failed tasks if present:\n{json.dumps(synth_input)}"
+            )}
         ]
         synth_tools = [{
             "type": "function",
@@ -1253,12 +1337,15 @@ class PemaliOrchestrator:
 
             if stream_queue is not None:
                 logger.debug("[Manager] Streaming synthesis LLM call")
+                synth_payload = _sanitize_messages(synth_payload)
+                await rate_limit_wait()
                 stream = await llm.chat.completions.create(
                     model=OPENROUTER_MODEL,
                     messages=synth_payload,
                     tools=synth_tools,
                     tool_choice="auto",
                     stream=True,
+                    max_tokens=8192,
                     timeout=90.0,
                 )
                 content = ""
@@ -1289,11 +1376,14 @@ class PemaliOrchestrator:
                     report = content or ""
             else:
                 logger.debug("[Manager] Non-streaming synthesis LLM call")
+                synth_payload = _sanitize_messages(synth_payload)
+                await rate_limit_wait()
                 res_synth = await llm.chat.completions.create(
                     model=OPENROUTER_MODEL,
                     messages=synth_payload,
                     tools=synth_tools,
                     tool_choice="auto",
+                    max_tokens=8192,
                     timeout=90.0,
                 )
                 msg = res_synth.choices[0].message
@@ -1320,15 +1410,23 @@ class PemaliOrchestrator:
             logger.critical(f"[Manager] {report[:300]}")
             logger.critical(f"[Manager] =========================")
 
-            # Retry jika report kosong — synthesis mungkin timeout
-            if not report or len(report.strip()) < 100:
-                logger.warning("[Manager] Synthesis returned empty report — retrying with extended timeout")
+            # Retry jika report kosong atau kena rate limit
+            retry_delays = [2, 6, 15]  # exponential backoff
+            for retry_idx, delay in enumerate(retry_delays):
+                if report and len(report.strip()) >= 100:
+                    break
+                reason = "empty report" if not report else f"short report ({len(report)} chars)"
+                logger.warning(f"[Manager] Synthesis {reason} — retry {retry_idx+1}/{len(retry_delays)} after {delay}s")
+                await asyncio.sleep(delay)
                 try:
+                    synth_payload = _sanitize_messages(synth_payload)
+                    await rate_limit_wait()
                     res_retry = await llm.chat.completions.create(
                         model=OPENROUTER_MODEL,
                         messages=synth_payload,
                         tools=synth_tools,
                         tool_choice={"type": "function", "function": {"name": "generate_report"}},
+                        max_tokens=4096,
                         timeout=120.0,
                     )
                     msg = res_retry.choices[0].message
@@ -1391,6 +1489,11 @@ class PemaliOrchestrator:
 
                 # Build nodes and edges
                 nodes = builder.build_nodes(snapshot)
+                label_to_id = {}
+                for i, node in enumerate(nodes):
+                    label = node.get("label")
+                    if label:
+                        label_to_id[label] = i + 1
                 edges = builder.build_edges(snapshot, label_to_id)
                 logger.debug(f"[Manager] Built {len(nodes)} nodes and {len(edges)} edges")
 
@@ -1443,7 +1546,7 @@ class PemaliOrchestrator:
         except Exception as e:
             logger.error(f"[Save] Full JSON error (non-critical): {e}")
 
-        return report
+        return _sanitize_output(report) if report else report
 
     # ═════════════════════════════════════════════════════════════
     # SPRINT 5 — Database persistence helpers

@@ -8,7 +8,7 @@ import traceback
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 from dotenv import load_dotenv
-load_dotenv(os.path.join(_PROJECT_ROOT, "config", ".env"))
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 import datetime
 import json
@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 # Import Core Components
 from backend.core.database import SessionLocal, init_db, AuditLog, AgentMemory, AutonomousTask, RawSensorData, ChatSession
-from backend.core.orchestrator import PemaliOrchestrator
+from backend.core.orchestrator import PemaliOrchestrator, _sanitize_messages
 from backend.core.telemetry import telemetry
 from backend.core.registry import registry
 from backend.core.models import TelemetryEvent, NodeState, CaseIntent, AskQuestion, TaskCreate, LaporanFilter
@@ -66,6 +66,24 @@ def get_db():
 MAX_CONCURRENT_TASKS = 10
 agent_semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
+# Counter active tasks — gak pake semaphore._value (private API)
+_active_tasks = 0
+_active_tasks_lock = asyncio.Lock()
+
+
+async def _acquire_task():
+    global _active_tasks
+    await agent_semaphore.acquire()
+    async with _active_tasks_lock:
+        _active_tasks += 1
+
+
+async def _release_task():
+    global _active_tasks
+    async with _active_tasks_lock:
+        _active_tasks -= 1
+    agent_semaphore.release()
+
 # --- Schemas ---
 class TriggerRequest(BaseModel):
     prompt: str = Field(..., min_length=3, max_length=500, description="Instruksi untuk agent.")
@@ -103,15 +121,49 @@ async def execute_agent_safely(prompt: str, session_id: str):
     finally:
         db.close()
 
-    async with agent_semaphore:
+    await _acquire_task()
+    try:
         logger.info(f"[EXEC] Semaphore acquired for session {session_id}")
+        # Collect telemetry events selama eksekusi buat DAG persistence
+        collected_events: list[Dict[str, Any]] = []
+        _original_emit = telemetry.emit
+        
+        async def _collector_emit(event: TelemetryEvent):
+            data = event.model_dump(mode='json')
+            collected_events.append(data)
+            await _original_emit(event)
+        
+        telemetry.emit = _collector_emit
         try:
             orchestrator = PemaliOrchestrator(session_id)
             logger.info(f"[EXEC] Orchestrator created, calling run()...")
             result = await orchestrator.run(prompt)
             logger.info(f"[EXEC] Agent execution completed for session {session_id}")
+        finally:
+            telemetry.emit = _original_emit
+    finally:
+        await _release_task()
 
-                    # Save assistant response to DB for session history
+        # Save collected telemetry events to DB
+        if collected_events:
+            try:
+                db2 = SessionLocal()
+                for ev in collected_events:
+                    db2.add(AgentMemory(
+                        session_id=session_id,
+                        role="telemetry",
+                        content=json.dumps(ev, ensure_ascii=False)
+                    ))
+                db2.commit()
+                logger.info(f"[EXEC] Saved {len(collected_events)} telemetry events for session {session_id}")
+            except Exception as e:
+                db2.rollback()
+                logger.error(f"[EXEC] Failed to save telemetry events: {e}")
+            finally:
+                db2.close()
+
+        # Save assistant response to DB for session history
+        try:
             if isinstance(result, str) and len(result) > 10:
                 logger.info(f"[EXEC] Saving assistant response to session {session_id}")
                 db = SessionLocal()
@@ -183,10 +235,13 @@ async def trigger_stream(req: TriggerRequest):
     async def event_generator():
         yield f"event: state\ndata: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
         try:
-            async with agent_semaphore:
+            await _acquire_task()
+            try:
                 orchestrator = PemaliOrchestrator(session_id)
                 async for line in orchestrator.run_streaming(req.prompt):
                     yield line
+            finally:
+                await _release_task()
         except Exception as e:
             logger.error(f"[/api/stream] Error: {e}", exc_info=True)
             yield f"event: state\ndata: {json.dumps({'state': 'ERROR', 'narrative': f'Fatal: {str(e)}', 'node_id': 'system'})}\n\n"
@@ -305,7 +360,7 @@ async def get_system_status(db: Session = Depends(get_db)):
         result = {
             "fastapi_active": True,
             "modules_loaded": len(registry.tools),
-            "concurrent_tasks_active": MAX_CONCURRENT_TASKS - agent_semaphore._value,
+            "concurrent_tasks_active": _active_tasks,
             "total_reports": total_reports,
             "total_sessions": total_sessions,
             "recent_tasks": [{"id": t.id, "status": t.status, "task_type": t.task_type, "priority": t.priority} for t in recent_tasks],
@@ -524,7 +579,8 @@ async def ask_laporan(id: int, req: AskQuestion, db: Session = Depends(get_db)):
         ]
         res = await llm.chat.completions.create(
             model=OPENROUTER_MODEL,
-            messages=messages,
+            messages=_sanitize_messages(messages),
+            max_tokens=2048,
             timeout=30.0,
         )
         answer = res.choices[0].message.content or "Maaf, tidak bisa menjawab pertanyaan ini."

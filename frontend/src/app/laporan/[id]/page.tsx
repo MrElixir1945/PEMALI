@@ -33,7 +33,7 @@ interface ReportDetail {
   created_at: string;
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://10.10.20.254:8000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
 
 const priorityColor = (p: number) => {
   if (p >= 8) return "rgb(176,112,104)";
@@ -125,10 +125,16 @@ export default function LaporanDetailPage() {
         <div className="text-center">
           <p className="text-[var(--state-error)] text-[15px] mb-3">{error || "Laporan tidak ditemukan"}</p>
           <button
-            onClick={() => router.push("/laporan")}
+            onClick={() => {
+              if (typeof window !== "undefined" && document.referrer.includes("/agentic")) {
+                router.push("/agentic");
+              } else {
+                router.push("/laporan");
+              }
+            }}
             className="text-[13px] text-[var(--pemali-accent)] hover:underline font-mono"
           >
-            ← Kembali ke daftar laporan
+            ← Kembali
           </button>
         </div>
       </div>
@@ -140,13 +146,19 @@ export default function LaporanDetailPage() {
       <div className="max-w-3xl mx-auto px-5 pt-12 pb-24">
         {/* Back navigation */}
         <motion.button
-          onClick={() => router.push("/laporan")}
+          onClick={() => {
+            if (typeof window !== "undefined" && document.referrer.includes("/agentic")) {
+              router.push("/agentic");
+            } else {
+              router.push("/laporan");
+            }
+          }}
           className="text-[12px] text-[var(--pemali-text-muted)] hover:text-[var(--pemali-text-primary)] transition-colors mb-6 inline-flex items-center gap-1 font-mono"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
           <span>←</span>
-          <span>Semua laporan</span>
+          <span>{typeof window !== "undefined" && document.referrer.includes("/agentic") ? "Kembali ke Agentic" : "Semua laporan"}</span>
         </motion.button>
 
         {/* Hero */}

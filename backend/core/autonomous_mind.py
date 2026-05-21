@@ -27,7 +27,7 @@ from backend.core.memory import (
     store_semantic_memory,
 )
 from backend.core.database import SessionLocal, AutonomousTask, AuditLog
-from backend.core.orchestrator import PemaliOrchestrator
+from backend.core.orchestrator import PemaliOrchestrator, _sanitize_messages
 
 logger = logging.getLogger("PEMALI.AutonomousMind")
 
@@ -190,9 +190,9 @@ class AutonomousMind:
         self.scan_result: Dict[str, Any] = {}
         self.osint_result: Dict[str, Any] = {}
 
-    async def wake(self, task: AutonomousTask) -> Dict[str, Any]:
+    async def wake(self, task_id: int, priority: int) -> Dict[str, Any]:
         """Entry point: bangun, evaluasi diri, pikir, jalankan, jadwalkan ulang."""
-        logger.info(f"[AutonomousMind] Waking: trace_id={self.trace_id}, task_id={task.id}")
+        logger.info(f"[AutonomousMind] Waking: trace_id={self.trace_id}, task_id={task_id}")
         await telemetry.emit(TelemetryEvent(
             trace_id=self.trace_id, node_id="agent_otak", node_type="Manager",
             state=NodeState.THINKING,
@@ -238,7 +238,7 @@ class AutonomousMind:
         if not cases:
             logger.info("[AutonomousMind] No cases decided — self-scheduling with LLM")
             next_delay = await self._calculate_next_interval_llm(cases, {}, eval_context) or 720
-            await self._schedule_next_wake(next_delay, task)
+            await self._schedule_next_wake(next_delay, task_id)
             return {"status": "idle", "cases": 0, "message": "Tidak ada kasus yang perlu diaudit."}
 
         # 5. Emit plan event with full context (for /agentic display)
@@ -273,7 +273,7 @@ class AutonomousMind:
         # 8. Self-schedule (LLM decided)
         next_delay = await self._calculate_next_interval_llm(cases, results, eval_context) or \
                       self._calculate_next_interval_fallback(cases, results)
-        await self._schedule_next_wake(next_delay, task)
+        await self._schedule_next_wake(next_delay, task_id)
 
         # 9. Store evaluation for next cycle
         await self._store_evaluation(eval_context)
@@ -391,12 +391,13 @@ Gunakan tool evaluate_past_cycle untuk mengevaluasi apakah keputusanmu sudah tep
             try:
                 res = await llm.chat.completions.create(
                     model=OPENROUTER_MODEL,
-                    messages=[
+                    messages=_sanitize_messages([
                         {"role": "system", "content": "Kamu adalah sistem evaluasi diri Agent Otak PEMALI."},
                         {"role": "user", "content": eval_prompt}
-                    ],
+                    ]),
                     tools=[EVALUATE_PAST_CYCLE_TOOL],
                     tool_choice="auto",
+                    max_tokens=2048,
                     timeout=60.0,
                 )
                 if not res or not res.choices:
@@ -437,12 +438,13 @@ Gunakan tool evaluate_past_cycle untuk mengevaluasi apakah keputusanmu sudah tep
             try:
                 res = await llm.chat.completions.create(
                     model=OPENROUTER_MODEL,
-                    messages=[
+                    messages=_sanitize_messages([
                         {"role": "system", "content": prompt},
                         {"role": "user", "content": "Putuskan kasus audit yang harus dijalankan SEKARANG. WAJIB panggil tool decide_cases dengan minimal 1 kasus spesifik di Bali. Jangan skip tool ini. PENTING: Jangan ulangi kasus yang sudah diaudit di cycle sebelumnya — pilih region dan topik yang berbeda."}
-                    ],
+                    ]),
                     tools=[DECIDE_CASES_TOOL],
-                    tool_choice={"type": "function", "function": {"name": "decide_cases"}},
+                    tool_choice="auto",
+                    max_tokens=2048,
                     timeout=90.0,
                 )
                 if not res or not res.choices:
@@ -786,10 +788,11 @@ Gunakan tool evaluate_past_cycle untuk mengevaluasi apakah keputusanmu sudah tep
             llm = get_llm_client()
             res = await llm.chat.completions.create(
                 model=OPENROUTER_MODEL,
-                messages=[
+                messages=_sanitize_messages([
                     {"role": "system", "content": "Generate 3-5 search keywords in Indonesian for current environmental issues in Bali. Return ONLY a JSON array of strings."},
                     {"role": "user", "content": f"Generate keywords based on evaluation context: {json.dumps(self.evaluation, ensure_ascii=False)[:500] if self.evaluation else 'First cycle'}"},
-                ],
+                ]),
+                max_tokens=1024,
                 timeout=20.0,
             )
             content = res.choices[0].message.content or ""
@@ -1026,12 +1029,13 @@ Gunakan tool evaluate_past_cycle untuk mengevaluasi apakah keputusanmu sudah tep
         try:
             res = await llm.chat.completions.create(
                 model=OPENROUTER_MODEL,
-                messages=[
+                messages=_sanitize_messages([
                     {"role": "system", "content": "Tentukan interval pemantauan berikutnya berdasarkan hasil audit."},
                     {"role": "user", "content": f"Berdasarkan hasil siklus ini:\n{json.dumps(context, ensure_ascii=False)[:2000]}\n\nGunakan tool schedule_next_wake."}
-                ],
+                ]),
                 tools=[SCHEDULE_NEXT_WAKE_TOOL],
                 tool_choice="auto",
+                max_tokens=1024,
                 timeout=30.0,
             )
             msg = res.choices[0].message
@@ -1061,7 +1065,7 @@ Gunakan tool evaluate_past_cycle untuk mengevaluasi apakah keputusanmu sudah tep
         except Exception as e:
             logger.warning(f"[AutonomousMind] Store evaluation failed: {e}")
 
-    async def _schedule_next_wake(self, delay_minutes: int, parent_task: AutonomousTask):
+    async def _schedule_next_wake(self, delay_minutes: int, parent_task_id: int):
         """Insert autonomous task baru ke database untuk siklus berikutnya."""
         db = SessionLocal()
         try:
@@ -1070,9 +1074,9 @@ Gunakan tool evaluate_past_cycle untuk mengevaluasi apakah keputusanmu sudah tep
                 task_type="autonomous",
                 priority=7,
                 execute_at=execute_at,
-                intent_description=f"Siklus otonom lanjutan dari task #{parent_task.id}. Delay {delay_minutes} menit.",
+                intent_description=f"Siklus otonom lanjutan dari task #{parent_task_id}. Delay {delay_minutes} menit.",
                 context_snapshot={
-                    "parent_task_id": parent_task.id,
+                    "parent_task_id": parent_task_id,
                     "trace_id": self.trace_id,
                     "confidence": self.evaluation.get("confidence", 5) if self.evaluation else 5,
                 },

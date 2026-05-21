@@ -1,66 +1,155 @@
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
-**/venv/
-**/.venv/
-**/.env
-.env.local
-.env.example
 *.egg-info/
+*.egg
+dist/
+build/
+*.so
 .pytest_cache/
-backend/reports/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.coverage.*
+*.cover
+*.py,cover
 
-# Node / Next.js
+# --- Virtual Environment ---
+.venv/
+venv/
+env/
+virtualenv/
+
+# --- Environment files ---
+.env
+.env.*
+!.env.example
+!.env.template
+
+# --- Node / Frontend ---
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+.yarn/
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+*.pem
+.vercel
+
+# --- OS files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.vscode/settings.json
+.vscode/workspace.json
+.project
+.classpath
+.settings/
+
+# --- PEMALI artifacts ---
+chroma_db/
+data/
+scratch/
+backups/
+.postgres_data/
+postgres_data/
+pg_data/
+
+# --- Backend runtime ---
+backend/logs/
+backend/reports/
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.env
+backend/chroma_db/
+
+# --- Frontend ---
 frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/build/
 frontend/*.tsbuildinfo
 frontend/next-env.d.ts
+frontend/coverage/
+frontend/.vercel
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development
 
-# Database
-*.sqlite3
-*.db
-postgres_data/
+# --- Old / deprecated directories ---
+frontend/src1/
+sse\ exsample/
+infra/
+PEMALI-bgus/
+contoh\ new\ module/
+new\ ask\ fitur/
+w7panel*/
 
-# IDEs & OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# PEMALI Specific
-data/
-chroma_db/
-scratch/
-logs/
-backups/
-backend/logs/
-(app)/
-.opencode/
-graphify-out/
-
-# Generated docs & artifacts
-ARCHITECTURE.html
-sprint-flow.html
-index.html
-PEMALI_Presentation.pptx
-pemali-logo.png
-*.pdf
+# --- Standalone scripts & docs ---
 create_pptx.js
 generate_logo_*.py
 test_module.py
+*.zip
+*.tar.gz
+*.rar
+*.7z
 run.sh
 
-# Scratch / notes
-/contoh\ new\ module/
-/new\ ask\ fitur/
-w7panel*/
+# --- Generated documentation ---
+ARCHITECTURE.html
+sprint-flow.html
+index.html
+*.pdf
 ROADMAP.md
 AUTONOMOUS_SWARM_SPEC.md
 SPRINT_5_GUIDE.md
 SPRINT_5_OPTIMIZATION.md
 
-# Old project copy
-PEMALI-bgus/
+# --- Scratch / notes ---
+scratch/
+notes/
+tmp/
+temp/
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Logo placeholder (1x1 dummy, real logo at /images/) ---
+frontend/public/logo.png
+
+# --- Database ---
+*.sqlite3
+*.db
+*.sqlite
+
+# --- Root Images ---
+*.png
+!frontend/public/images/*.png
+agentic_mode_dashboard.png

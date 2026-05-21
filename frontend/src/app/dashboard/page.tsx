@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { Sidebar, FinalReport } from "@/components/pemali/dashboard/ObservationZone";
@@ -15,7 +15,7 @@ import {
   type ChatMessage as Message,
 } from "@/lib/dashboard";
 import { useTelemetryStore } from "@/stores/telemetryStore";
-import { Cpu, Database, Activity, PanelLeft, Plus, Search, MessageSquare, Leaf, Waves, Wind, Flame, Home, Brain, Globe, Droplets, ChevronDown, ChevronUp, Check, AlertCircle, Calendar, FileText } from "lucide-react";
+import { Cpu, Database, Activity, PanelLeft, Plus, Search, MessageSquare, Leaf, Waves, Wind, Flame, Home, Brain, Globe, Droplets, ChevronDown, ChevronUp, Check, AlertCircle, Calendar, FileText, Bot, Camera, CloudSun, Compass } from "lucide-react";
 
 // ── Typing Bubble ──────────────────────────────────────
 function TypingBubble() {
@@ -45,12 +45,71 @@ function TypingBubble() {
   );
 }
 
+// ── Custom Flat SVGs for precise icon mappings ───────────
+const InstagramIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg
+    viewBox="0 0 24 24"
+    width="20"
+    height="20"
+    stroke="currentColor"
+    strokeWidth="2"
+    fill="none"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+    <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+    <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+  </svg>
+);
+
+const EarthquakeIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg
+    viewBox="0 0 24 24"
+    width="20"
+    height="20"
+    stroke="currentColor"
+    strokeWidth="2"
+    fill="none"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    {/* Ground baseline */}
+    <path d="M2 19h20" />
+    
+    {/* Ground cracks underneath */}
+    <path d="M11 19l-1.5 2.5 3 2.5" />
+    
+    {/* Left tilted building */}
+    <path d="M4 19l-1-8 4-1 1 9" />
+    {/* Clean horizontal divider for left building */}
+    <path d="M3.5 15l4-1" />
+    
+    {/* Middle straight but shaking building */}
+    <path d="M9.5 19l1.5-12 4 0.5-1.5 11.5" />
+    {/* Clean horizontal divider for middle building */}
+    <path d="M10.2 13l4 0.5" />
+    
+    {/* Right tilted building */}
+    <path d="M16 19l1.5-7 4 1-1.5 6" />
+    {/* Clean horizontal divider for right building */}
+    <path d="M16.7 15.5l4 1" />
+    
+    {/* Shaking vibration waves on the left */}
+    <path d="M1.5 8.5l1.5 1.5-1.5 1.5" />
+    {/* Shaking vibration waves on the right */}
+    <path d="M22.5 8.5l-1.5 1.5 1.5 1.5" />
+  </svg>
+);
+
 // ── Agent Metadata & Icons mapping (no emoji) ───────────
 const AGENT_META: Record<string, { name: string; subtitle: string; icon: React.ComponentType<any> }> = {
   manager: {
     name: "Manager Agent",
     subtitle: "STRATEGIC PLANNING",
-    icon: Brain,
+    icon: Cpu,
   },
   geo_agent: {
     name: "Geo Agent",
@@ -77,10 +136,55 @@ const AGENT_META: Record<string, { name: string; subtitle: string; icon: React.C
     subtitle: "AUTONOMOUS TICK LOOP",
     icon: Calendar,
   },
+  system_scheduler: {
+    name: "System Scheduler Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: Calendar,
+  },
   synthesis: {
     name: "Synthesis Agent",
     subtitle: "FINAL RECOMMENDATIONS",
     icon: FileText,
+  },
+  air_quality_index: {
+    name: "Air Quality Index Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: Wind,
+  },
+  weather_hazard_monitor: {
+    name: "Weather Hazard Monitor Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: CloudSun,
+  },
+  fire_hotspot_detector: {
+    name: "Fire Hotspot Detector Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: Flame,
+  },
+  osint_web_search: {
+    name: "Osint Web Search Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: Search,
+  },
+  osint_trend_scanner: {
+    name: "Osint Trend Scanner Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: Search,
+  },
+  osint_instagram_monitor: {
+    name: "Osint Instagram Monitor Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: InstagramIcon,
+  },
+  sea_level_tide_monitor: {
+    name: "Sea Level & Tide Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: Waves,
+  },
+  earthquake_risk_monitor: {
+    name: "Earthquake Risk Agent",
+    subtitle: "COGNITIVE SUB-AGENT",
+    icon: EarthquakeIcon,
   },
 };
 
@@ -88,7 +192,7 @@ const getAgentMeta = (nodeId: string) => {
   return AGENT_META[nodeId] || {
     name: nodeId.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) + " Agent",
     subtitle: "COGNITIVE SUB-AGENT",
-    icon: Brain,
+    icon: Bot,
   };
 };
 
@@ -98,6 +202,78 @@ interface NodeData {
   narrative: string;
   node_type: string;
   tool_name?: string;
+}
+
+// ── Agent Metadata & Skills Mapping ──────────────────────
+const AGENT_SKILLS: Record<string, string[]> = {
+  manager: ["Strategizing & DAG Task Planning", "Multi-Agent Coordination", "ChromaDB Context Retrieval"],
+  geo_agent: ["Sentinel-2 NDVI Vegetation Audit", "Spatial Imagery Mapping", "Forest Canopy Analysis"],
+  water_agent: ["Water pH/Oxygen IoT Analysis", "Ayung River Sensor Audit", "Tri Hita Karana Hydro Balance"],
+  fire_agent: ["MODIS Hotspot Thermal Detection", "Fire Hazard Intensity Mapping", "Risk Mitigation Alerting"],
+  osint_agent: ["Local News Scraping & Extraction", "Web Search API Audit", "Social Public Sentiment"],
+  scheduler_agent: ["Tick Daemon Loop Integration", "State Machine Chron Audit"],
+  synthesis: ["Parahyangan-Pawongan-Palemahan Matrix Synthesis", "Grounded Narrative Audit Report Generator"]
+};
+
+const getAgentSkills = (nodeId: string) => {
+  return AGENT_SKILLS[nodeId] || ["Cognitive Agent Domain Inference", "UTI Module Protocol Execution"];
+};
+
+// ── TypewriterText (untuk efek mengetik narasi subagent dengan lancar saat streaming) ───
+function TypewriterText({ text, active }: { text: string; active: boolean }) {
+  const [displayed, setDisplayed] = useState("");
+  const currentTextRef = useRef("");
+  
+  useEffect(() => {
+    if (!text) {
+      setDisplayed("");
+      currentTextRef.current = "";
+      return;
+    }
+    
+    // Jika teks bertambah (SSE incremental update), ketikkan sisa tambahannya
+    if (text.startsWith(currentTextRef.current)) {
+      const newPart = text.slice(currentTextRef.current.length);
+      if (!newPart) return;
+      
+      let index = 0;
+      const step = newPart.length > 50 ? 4 : 1;
+      const interval = newPart.length > 50 ? 5 : 15;
+      
+      const timer = setInterval(() => {
+        index += step;
+        if (index >= newPart.length) {
+          setDisplayed(text);
+          currentTextRef.current = text;
+          clearInterval(timer);
+        } else {
+          setDisplayed(currentTextRef.current + newPart.substring(0, index));
+        }
+      }, interval);
+      
+      return () => clearInterval(timer);
+    } else {
+      // Jika teks berubah total (session baru / reset), jalankan pengetikan penuh
+      let index = 0;
+      const step = text.length > 500 ? 5 : text.length > 200 ? 3 : 1;
+      const interval = text.length > 500 ? 5 : 12;
+      
+      const timer = setInterval(() => {
+        index += step;
+        if (index >= text.length) {
+          setDisplayed(text);
+          currentTextRef.current = text;
+          clearInterval(timer);
+        } else {
+          setDisplayed(text.substring(0, index));
+        }
+      }, interval);
+      
+      return () => clearInterval(timer);
+    }
+  }, [text]);
+
+  return <span>{displayed}</span>;
 }
 
 // ── AgentThinkingCard (collapsible with typewriter) ───
@@ -118,73 +294,82 @@ function AgentThinkingCard({
 }) {
   const meta = getAgentMeta(node.node_id);
   const Icon = meta.icon;
+  const skills = getAgentSkills(node.node_id);
 
   const [typedText, setTypedText] = useState("");
+  const cardEndRef = useRef<HTMLDivElement>(null);
+  const liveThinkingText = useTelemetryStore((s) => s.thinkingStates[node.node_id]?.text || "");
   
-  // Typewriter effect (15ms/character) — skip if already done (history mode)
   useEffect(() => {
-    const text = node.narrative || "";
-    const done = node.state === "DONE" || node.state === "ERROR";
-    if (done) {
-      setTypedText(text);
-      return;
+    if (isActive) {
+      setTypedText(liveThinkingText);
+    } else {
+      setTypedText(node.narrative || "");
     }
-    setTypedText("");
-    if (!text) return;
+  }, [liveThinkingText, node.narrative, isActive]);
 
-    let index = 0;
-    let timer: NodeJS.Timeout;
-    const tick = () => {
-      index++;
-      setTypedText(text.slice(0, index));
-      if (index < text.length) timer = setTimeout(tick, 15);
-    };
-    tick();
-    return () => clearTimeout(timer);
-  }, [node.narrative]);
+  const isTyping = isActive && liveThinkingText.length > 0;
 
-  const isTyping = isActive && typedText.length < (node.narrative || "").length;
+  useEffect(() => {
+    if (isTyping) {
+      cardEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [typedText, isTyping]);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      className="w-full bg-[#faf9f6] rounded-lg border overflow-hidden"
+      transition={{ duration: 0.35, ease: [0.25, 0.1, 0.25, 1] }}
+      className={`w-full bg-[#faf9f6] rounded-xl border overflow-hidden transition-all duration-500 ${
+        isActive ? "active-agent-card border-[var(--pemali-accent)]/30 ring-1 ring-[var(--pemali-accent)]/5" : ""
+      }`}
       style={{
-        borderColor: isDone ? "#10B981" : isError ? "#EF4444" : "#e5e2dc",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
-        transition: "border-color 500ms ease, background-color 500ms ease",
+        borderColor: isDone ? "#10B981" : isError ? "#EF4444" : isActive ? "rgba(139,92,246,0.3)" : "#e5e2dc",
+        boxShadow: isActive ? "0 4px 12px rgba(139,92,246,0.03)" : "0 1px 3px rgba(0,0,0,0.01)",
       }}
     >
       {/* Header Row */}
       <div 
         onClick={onToggle}
-        className="px-5 py-4 flex items-center justify-between cursor-pointer select-none hover:bg-black/[0.01] transition-colors"
+        className="px-5 py-4.5 flex items-start justify-between cursor-pointer select-none hover:bg-black/[0.01] transition-colors"
       >
-        <div className="flex items-center gap-4">
+        <div className="flex items-start gap-4">
           <div 
-            className="w-10 h-10 rounded-lg flex items-center justify-center border"
+            className="w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 mt-0.5"
             style={{
-              borderColor: isDone ? "#d1fae5" : isError ? "#fee2e2" : "#e5e2dc",
-              backgroundColor: isDone ? "#f0fdf4" : isError ? "#fef2f2" : "#ffffff",
-              color: isDone ? "#059669" : isError ? "#dc2626" : "#7a7670",
+              borderColor: isDone ? "#d1fae5" : isError ? "#fee2e2" : isActive ? "rgba(139,92,246,0.2)" : "#e5e2dc",
+              backgroundColor: isDone ? "#f0fdf4" : isError ? "#fef2f2" : isActive ? "rgba(139,92,246,0.05)" : "#ffffff",
+              color: isDone ? "#059669" : isError ? "#dc2626" : isActive ? "var(--pemali-accent)" : "#7a7670",
               transition: "all 500ms ease",
             }}
           >
-            <Icon size={20} />
+            {Icon && <Icon size={20} />}
           </div>
           <div>
-            <h4 className="text-[14px] font-bold text-[#1A1916] leading-none mb-1.5">
-              {meta.name}
+            <h4 className="text-[14px] font-bold text-[#1A1916] leading-none mb-1.5 flex items-center flex-wrap gap-2">
+              <span>{meta.name}</span>
+              {node.tool_name && (
+                <span className="text-[9px] font-mono tracking-wider lowercase bg-[#f2efe9] px-1.5 py-0.5 rounded text-[#7a7670] border border-[#e5e2dc]">
+                  modul: {node.tool_name}
+                </span>
+              )}
             </h4>
-            <p className="text-[9px] font-mono tracking-widest text-[#999] uppercase leading-none">
+            <p className="text-[9px] font-mono tracking-widest text-[#999] uppercase leading-none mb-2.5">
               {meta.subtitle}
             </p>
+            {/* Display Skills badges */}
+            <div className="flex flex-wrap gap-1">
+              {skills.map((s, idx) => (
+                <span key={idx} className="text-[9px] font-mono text-[#7A7670] bg-[#f2efe9]/60 px-1.5 py-0.5 rounded border border-[#e5e2dc]/40">
+                  {s}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           {/* Badge */}
           {isDone ? (
             <span className="flex items-center gap-1 text-[10px] font-bold text-[#047857] bg-[#d1fae5] px-2.5 py-1 rounded-full uppercase tracking-wider font-mono">
@@ -217,19 +402,34 @@ function AgentThinkingCard({
 
       {/* Narrative Monospace Log */}
       <AnimatePresence initial={false}>
-        {isOpen && (node.narrative || isTyping) && (
+        {isOpen && (
           <motion.div
             initial={{ height: 0 }}
             animate={{ height: "auto" }}
             exit={{ height: 0 }}
             transition={{ duration: 0.25, ease: "easeInOut" }}
-            className="border-t border-[#e5e2dc] bg-black/[0.01]"
+            className="border-t border-[#e5e2dc] bg-black/[0.005]"
           >
-            <div className="px-5 py-4 font-mono text-[11px] text-[#7A7670] leading-relaxed whitespace-pre-wrap">
-              {typedText || "Menunggu proses..."}
-              {isTyping && (
-                <span className="inline-block animate-pulse font-sans font-bold text-[var(--pemali-accent)] ml-0.5">▌</span>
+            <div className="px-5 py-4 font-mono text-[11px] text-[#7A7670] leading-relaxed whitespace-pre-wrap relative">
+              <div className="text-[12px] text-[#555] font-sans italic opacity-60 mb-2 font-light">
+                {isTyping ? "✦ AI sedang menalar..." : "✦ Hasil penalaran:"}
+              </div>
+              <span className="font-mono text-[#52525B] tracking-tight">
+                {typedText ? (
+                  <TypewriterText text={typedText} active={isActive} />
+                ) : isTyping ? (
+                  <span className="inline-flex items-center gap-2 text-[#7A7670] italic animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--pemali-accent)] animate-ping shrink-0" />
+                    Menginisialisasi modul kognitif...
+                  </span>
+                ) : (
+                  "Proses berjalan tanpa catatan log."
+                )}
+              </span>
+              {isTyping && typedText.length > 0 && (
+                <span className="inline-block animate-pulse font-sans font-bold text-[var(--pemali-accent)] ml-0.5">█</span>
               )}
+              <div ref={cardEndRef} />
             </div>
           </motion.div>
         )}
@@ -245,28 +445,33 @@ function DagVisualizer({
   messages,
   view,
   onToggleView,
+  onCloseSplitView,
 }: {
   events: TelemetryEvent[];
   finalReport: string | null;
   messages: Message[];
   view: string;
   onToggleView: () => void;
+  onCloseSplitView?: () => void;
 }) {
-  // Build node map in order of appearance
-  const nodeMap = new Map<string, NodeData>();
-  for (const ev of events) {
-    if (!ev.node_id || ev.node_id === "system") continue;
-    const prev = nodeMap.get(ev.node_id);
-    nodeMap.set(ev.node_id, {
-      node_id: ev.node_id,
-      state: ev.state,
-      narrative: ev.narrative || prev?.narrative || "",
-      node_type: (ev as any).node_type || prev?.node_type || "",
-      tool_name: (ev as any).metadata?.tool_name || prev?.tool_name,
-    });
-  }
-
-  const allNodes = [...nodeMap.values()];
+  // Filter out IDLE nodes and synthesis node so they are progressively revealed one-by-one
+  const allNodes = useMemo(() => {
+    const nodeMap = new Map<string, NodeData>();
+    for (const ev of events) {
+      if (!ev.node_id || ev.node_id === "system") continue;
+      // Exclude report text from agent reasoning narrative area, but preserve existing narrative if already parsed
+      const isReportText = ev.narrative && (ev.narrative.startsWith("#") || ev.metadata?.type === "final_report" || ev.metadata?.type === "synthesis");
+      const prev = nodeMap.get(ev.node_id);
+      nodeMap.set(ev.node_id, {
+        node_id: ev.node_id,
+        state: ev.state,
+        narrative: isReportText ? (prev?.narrative || "") : (ev.narrative || prev?.narrative || ""),
+        node_type: (ev as any).node_type || prev?.node_type || "",
+        tool_name: (ev as any).metadata?.tool_name || prev?.tool_name,
+      });
+    }
+    return [...nodeMap.values()].filter(n => n.state !== "IDLE" && n.node_id !== "synthesis");
+  }, [events]);
 
   // Status counts
   const doneCount    = allNodes.filter(n => n.state === "DONE").length;
@@ -281,14 +486,16 @@ function DagVisualizer({
 
   // React state Map to track manual overrides by the user
   const [manualExpanded, setManualExpanded] = useState<Map<string, boolean>>(new Map());
+  const bodyContainerRef = useRef<HTMLDivElement>(null);
+  const [prevNodesCount, setPrevNodesCount] = useState(0);
 
   // Determine if a card should be open
   const isOpen = (nodeId: string, state: string) => {
     if (manualExpanded.has(nodeId)) {
       return manualExpanded.get(nodeId)!;
     }
-    // Default: open if actively thinking/executing/spawning
-    return ["THINKING", "EXECUTING", "SPAWNING"].includes(state);
+    // Default: open all active and completed nodes to let user review full thinking process
+    return state !== "IDLE";
   };
 
   const handleToggleCard = (nodeId: string, currentState: string) => {
@@ -300,6 +507,21 @@ function DagVisualizer({
     });
   };
 
+  // Scroll active card into view secara otomatis HANYA ketika agent baru pertama kali ditemukan
+  useEffect(() => {
+    if (allNodes.length > prevNodesCount) {
+      setPrevNodesCount(allNodes.length);
+      setTimeout(() => {
+        if (bodyContainerRef.current) {
+          const activeCard = bodyContainerRef.current.querySelector(".active-agent-card");
+          if (activeCard) {
+            activeCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+        }
+      }, 300);
+    }
+  }, [allNodes.length, prevNodesCount]);
+
   return (
     <div
       className="h-full flex flex-col bg-white overflow-hidden"
@@ -310,14 +532,25 @@ function DagVisualizer({
         <span className="text-[10px] font-mono font-semibold tracking-[0.15em] text-[#999] uppercase">
           {view === "report" ? "Laporan Audit" : "Alur Kerja"}
         </span>
-        {view === "report" && (
-          <button
-            onClick={onToggleView}
-            className="text-[10px] font-mono text-[#7A7670] hover:text-[#1A1916] transition-colors"
-          >
-            ← Lihat Alur Kerja
-          </button>
-        )}
+        <div className="flex items-center gap-4">
+          {view === "report" && (
+            <button
+              onClick={onToggleView}
+              className="text-[10px] font-mono text-[#7A7670] hover:text-[#1A1916] transition-colors"
+            >
+              ← Lihat Alur Kerja
+            </button>
+          )}
+          {onCloseSplitView && (
+            <button
+              onClick={onCloseSplitView}
+              className="text-[10px] font-mono text-[var(--pemali-accent)] hover:text-[#7C3AED] hover:underline transition-all flex items-center gap-1 font-semibold"
+              title="Kembali ke chat normal"
+            >
+              Tutup Alur Kerja ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Status summary bar */}
@@ -334,7 +567,10 @@ function DagVisualizer({
       )}
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6 scrollbar-none">
+      <div 
+        ref={bodyContainerRef}
+        className="flex-1 overflow-y-auto px-6 pb-6 scrollbar-none"
+      >
         {view === "report" ? (
           /* ── Report View ── */
           reportContent ? (
@@ -353,18 +589,85 @@ function DagVisualizer({
             <p className="text-[12px] text-[#999]">Menunggu respons agent...</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {allNodes.map(node => (
-              <AgentThinkingCard
-                key={node.node_id}
-                node={node}
-                isActive={["EXECUTING", "THINKING", "SPAWNING"].includes(node.state)}
-                isDone={node.state === "DONE"}
-                isError={node.state === "ERROR"}
-                isOpen={isOpen(node.node_id, node.state)}
-                onToggle={() => handleToggleCard(node.node_id, node.state)}
-              />
-            ))}
+          <div className="flex flex-col my-4 ml-6">
+            {allNodes.map((node, index) => {
+              const active = ["EXECUTING", "THINKING", "SPAWNING"].includes(node.state);
+              const done = node.state === "DONE";
+              const error = node.state === "ERROR";
+              const isLast = index === allNodes.length - 1;
+              const lineColor = done ? "#10B981" : active ? "var(--pemali-accent)" : "#e5e2dc";
+
+              return (
+                <div key={node.node_id} className="flex items-stretch" style={{ gap: 16, marginBottom: isLast ? 0 : 12 }}>
+                  {/* Kolom kiri: bullet (top-aligned) + line segment ke bawah */}
+                  <div className="flex flex-col items-center flex-shrink-0" style={{ width: 8 }}>
+                    {/* Spacer atas: dorong bullet sejajar header card (~25px) */}
+                    <div style={{ height: 25, flexShrink: 0 }} />
+                    {/* Bullet */}
+                    <div
+                      className="flex-shrink-0 transition-all duration-500 relative"
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        border: `1.5px solid ${done ? "#10B981" : error ? "#EF4444" : active ? "var(--pemali-accent)" : "#d4d0c9"}`,
+                        background: done ? "#f0fdf4" : active ? "rgba(139,92,246,0.08)" : "#ffffff",
+                        boxShadow: active
+                          ? "0 0 8px rgba(139,92,246,0.4)"
+                          : done
+                            ? "0 0 6px rgba(16,185,129,0.35)"
+                            : "none",
+                      }}
+                    >
+                      {active && (
+                        <span
+                          className="absolute rounded-full animate-ping opacity-40"
+                          style={{ inset: -3, background: "var(--pemali-accent)" }}
+                        />
+                      )}
+                    </div>
+                    {/* Line segment + arrowhead ke node berikutnya */}
+                    {!isLast && (
+                      <div className="flex-1 relative flex justify-center" style={{ minHeight: 12, marginBottom: -12 }}>
+                        {/* Garis vertikal */}
+                        <div
+                          className="transition-colors duration-500"
+                          style={{
+                            width: 1.5,
+                            height: "calc(100% - 5px)", // sisakan ruang untuk arrow
+                            background: lineColor,
+                          }}
+                        />
+                        {/* Arrowhead SVG di ujung bawah */}
+                        <svg
+                          width="10"
+                          height="8"
+                          viewBox="0 0 10 8"
+                          fill="none"
+                          className="absolute bottom-0 transition-all duration-500"
+                          style={{ left: "50%", transform: "translateX(-50%)" }}
+                        >
+                          <path d="M5 8L0 0h10L5 8z" fill={lineColor} />
+                        </svg>
+                      </div>
+                    )}
+
+                  </div>
+
+                  {/* Kolom kanan: card */}
+                  <div className="flex-1 min-w-0">
+                    <AgentThinkingCard
+                      node={node}
+                      isActive={active}
+                      isDone={done}
+                      isError={error}
+                      isOpen={isOpen(node.node_id, node.state)}
+                      onToggle={() => handleToggleCard(node.node_id, node.state)}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -398,10 +701,26 @@ function WelcomeScreen({
   }, []);
 
   const SUGGESTIONS = [
-    { text: "Vegetasi Ubud", icon: <Leaf size={14} /> },
-    { text: "Sungai Ayung", icon: <Waves size={14} /> },
-    { text: "Polusi Udara Denpasar", icon: <Wind size={14} /> },
-    { text: "Hotspot Kintamani", icon: <Flame size={14} /> },
+    { 
+      label: "Audit vegetasi & deforestasi di Ubud", 
+      prompt: "Audit vegetasi dan deforestasi di daerah Ubud menggunakan sensor MODIS/NDVI", 
+      icon: <Leaf size={13} className="text-[#7a7670]" /> 
+    },
+    { 
+      label: "Analisis kualitas air Sungai Ayung", 
+      prompt: "Analisis kualitas air Sungai Ayung dan hidrologi sekitarnya", 
+      icon: <Waves size={13} className="text-[#7a7670]" /> 
+    },
+    { 
+      label: "Pantau polusi udara kota Denpasar", 
+      prompt: "Pantau polusi udara dan kualitas partikulat PM2.5 di kota Denpasar", 
+      icon: <Wind size={13} className="text-[#7a7670]" /> 
+    },
+    { 
+      label: "Deteksi potensi kebakaran di daerah Kintamani", 
+      prompt: "Deteksi titik panas kebakaran hutan (hotspot) di wilayah Kintamani", 
+      icon: <Flame size={13} className="text-[#7a7670]" /> 
+    },
   ];
 
   const handleSend = () => {
@@ -458,15 +777,15 @@ function WelcomeScreen({
         </div>
 
         {/* Suggestion Chips */}
-        <div className="flex flex-wrap gap-2 justify-center">
+        <div className="flex flex-wrap gap-2.5 justify-center mt-1">
           {SUGGESTIONS.map((s) => (
             <button
-              key={s.text}
-              onClick={() => onSend(s.text)}
-              className="px-3.5 py-2 text-[11px] font-mono border border-[var(--pemali-border)] rounded-full text-[var(--pemali-text-secondary)] hover:text-[var(--pemali-text-primary)] hover:border-[var(--pemali-border-glow)] transition-all bg-[var(--pemali-surface)]/45 flex items-center gap-2 select-none"
+              key={s.label}
+              onClick={() => onSend(s.prompt)}
+              className="px-4 py-2.5 text-[12px] font-sans border border-[#d0ccc0] rounded-full text-[#1A1916] hover:text-[#1A1916] hover:border-[#c8a882] hover:bg-[#e8e4dd] transition-all bg-[#f0ede6] shadow-[0_1px_2px_rgba(0,0,0,0.02)] flex items-center gap-2 select-none active:scale-[0.97]"
             >
               <span>{s.icon}</span>
-              <span>{s.text}</span>
+              <span>{s.label}</span>
             </button>
           ))}
         </div>
@@ -484,6 +803,7 @@ export default function PemaliDashboard() {
   const events = useTelemetryStore((s) => s.events);
   const isConnected = useTelemetryStore((s) => s.isConnected);
   const clearEvents = useTelemetryStore((s) => s.clearEvents);
+  const clearThinkingStates = useTelemetryStore((s) => s.clearThinkingStates);
   const setEvents = useTelemetryStore((s) => s.setEvents);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -492,12 +812,12 @@ export default function PemaliDashboard() {
   const [hasStarted, setHasStarted] = useState(false);
   const [auditMode, setAuditMode] = useState(false);
   const [observationView, setObservationView] = useState("process");
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [mainView, setMainView] = useState<"chat" | "recents">("chat");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const backendUrl = "";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8080";
 
   const [systemStatus, setSystemStatus] = useState<{
     fastapi_active: boolean;
@@ -586,24 +906,24 @@ export default function PemaliDashboard() {
     if (events.length === 0) return;
     const event = events[events.length - 1];
 
-    // Auto-switch to report on synthesis event
+    // Handle synthesis event - display report in chat, keep center as process
     if (event.node_id === "synthesis") {
       if (event.state === "DONE" && event.narrative) {
         setFinalReport(event.narrative);
         setIsTyping(false);
         setMessages(prev => {
           const last = prev[prev.length - 1];
-          if (last?.content.includes("Audit Selesai")) return prev;
+          if (last?.content.includes("# Laporan") || last?.content.includes("# 🌿")) return prev;
           return [...prev, { 
             role: "assistant", 
-            content: "✅ **Audit Selesai.** Laporan lengkap telah kami susun dan tampilkan di panel tengah. Silakan tinjau temuan kami.", 
+            content: event.narrative, 
             ts: Date.now() 
           }];
         });
         setTimeout(() => {
-          setObservationView("report");
-          setAuditMode(true);
-        }, 1000);
+          setObservationView("process");
+          setAuditMode(false);
+        }, 500);
       }
     }
 
@@ -618,19 +938,27 @@ export default function PemaliDashboard() {
       }
     }
 
-    const hasSubAgent = events.some(ev => 
-      ev.node_type === "SubAgent" || 
-      ev.node_type === "Manager" ||
-      (ev as any).metadata?.plan
-    );
-    setAuditMode(hasSubAgent);
+    if (event.state === "ERROR") {
+      setIsTyping(false);
+    }
+
+    const hasSynthesisDone = events.some(ev => ev.node_id === "synthesis" && ev.state === "DONE");
+    if (!finalReport && !hasSynthesisDone) {
+      const hasSubAgent = events.some(ev => 
+        ev.node_type === "SubAgent" || 
+        (ev.node_type === "Manager" && ev.metadata?.type !== "chat_response") ||
+        (ev as any).metadata?.plan
+      );
+      setAuditMode(hasSubAgent);
+    }
   }, [events]);
 
   const handleSelectSession = async (id: string) => {
     setActiveSessionId(id);
     setIsTyping(false);
     clearEvents();
-      setFinalReport(null);
+    clearThinkingStates();
+    setFinalReport(null);
       setAuditMode(false);
       setObservationView("process");
 
@@ -642,7 +970,18 @@ export default function PemaliDashboard() {
         setActiveSessionId(id);
         setHasStarted(true);
         
-        // 1. Rekonstruksi Telemetry dari memory untuk DAG (Logic Thinking)
+        // 1. Load telemetry events dari DB (real events, bukan reconstruction)
+        const telemetryEvents: any[] = (data.agent_memories || [])
+        .filter((m: any) => m.role === "telemetry")
+        .map((m: any) => {
+          try {
+            const ev = JSON.parse(m.content);
+            return { ...ev, timestamp: ev.timestamp || new Date(m.created_at || Date.now()).getTime() };
+          } catch { return null; }
+        })
+        .filter(Boolean);
+
+        // 1b. Fallback: Rekonstruksi Telemetry dari memory untuk DAG
         const reconstructedEvents: any[] = (data.agent_memories || [])
         .filter((m: any) => m.role === "assistant")
         .map((m: any) => {
@@ -666,7 +1005,8 @@ export default function PemaliDashboard() {
             timestamp: new Date(m.created_at || Date.now()).getTime()
           };
         });
-      setEvents(reconstructedEvents);
+        // Gunakan telemetry events dari DB kalau ada, fallback ke reconstruction
+        setEvents(telemetryEvents.length > 0 ? telemetryEvents : reconstructedEvents);
 
       // 2. Filter pesan untuk chat UI (Editorial Look)
       const chatHistory = (data.agent_memories || [])
@@ -677,7 +1017,7 @@ export default function PemaliDashboard() {
             if (m.name) {
               if (m.name !== "manager") return false;
             } else {
-              // Backward compatibility: sembunyikan laporan akhir dari chat bubble
+              // Backward compatibility: sembunyikan laporan akhir dari chat bubble biasa (kita gabungkan di akhir)
               if (m.content.includes("# Laporan") || m.content.includes("# 🌿")) return false;
             }
 
@@ -686,6 +1026,8 @@ export default function PemaliDashboard() {
             if (isJson) {
               try {
                 const parsed = JSON.parse(trimmed);
+                // Sembunyikan jika ini telemetry event
+                if (parsed.trace_id || parsed.node_id || parsed.node_type || parsed.state || parsed.event) return false;
                 // Sembunyikan jika ini data teknis murni (status success/error)
                 if (parsed.status && (parsed.status === "success" || parsed.status === "error")) return false;
                 // Sembunyikan jika ini tool call internal
@@ -704,33 +1046,42 @@ export default function PemaliDashboard() {
           content: m.content,
           ts: new Date(m.created_at).getTime()
         }));
-      setMessages(chatHistory);
 
-      // 3. Cari laporan di audit_logs
+      // 3. Cari laporan di audit_logs atau fallback ke memories untuk instant load
       const report = (data.audit_logs || []).find(
         (l: any) => l.narrative_report && (l.narrative_report.includes("#") || l.narrative_report.includes("🌿"))
       );
       
+      let finalReportText: string | null = null;
       if (report) {
-        setFinalReport(report.narrative_report);
-        setAuditMode(true);
-        setObservationView("report");
+        finalReportText = report.narrative_report;
       } else {
-        // Fallback: cari laporan di memory
         const reportInMemory = (data.agent_memories || [])
           .reverse()
           .find((m: any) => m.role === "assistant" && (m.content.includes("# Laporan") || m.content.includes("# 🌿")));
-        
         if (reportInMemory) {
-          setFinalReport(reportInMemory.content);
-          setAuditMode(true);
-          setObservationView("report");
-        } else {
-          setFinalReport(null);
-          setAuditMode(false);
-          setObservationView("process");
+          finalReportText = reportInMemory.content;
         }
       }
+
+      if (finalReportText) {
+        setFinalReport(finalReportText);
+        setAuditMode(false);
+        setObservationView("report");
+
+        // Gabungkan langsung ke chatHistory untuk Instant-Load bebas delay!
+        chatHistory.push({
+          role: "assistant",
+          content: finalReportText,
+          ts: Date.now()
+        });
+      } else {
+        setFinalReport(null);
+        setAuditMode(false);
+        setObservationView("process");
+      }
+
+      setMessages(chatHistory);
     } catch (err) {
       console.error("Error loading history:", err);
     }
@@ -739,7 +1090,8 @@ export default function PemaliDashboard() {
   const handleNewAudit = () => {
     setActiveSessionId(null);
     setMessages([]);
-    setEvents([]);
+    clearEvents();
+    clearThinkingStates();
     setFinalReport(null);
     setObservationView("process");
     setIsTyping(false);
@@ -752,7 +1104,8 @@ export default function PemaliDashboard() {
     setHasStarted(true);
     setMessages(prev => [...prev, { role: "user", content, ts: Date.now() }]);
     setIsTyping(true);
-    setEvents([]);
+    clearEvents();
+    clearThinkingStates();
 
     try {
       const res = await fetch(`${backendUrl}/api/trigger`, {
@@ -853,6 +1206,13 @@ export default function PemaliDashboard() {
                 <Link href="/" className="flex items-center text-[var(--pemali-text-secondary)] hover:text-[var(--pemali-text-primary)] transition-colors w-full" title="Platform">
                   <div className="w-5 flex items-center justify-center shrink-0"><Home size={16} /></div>
                   <span className={`ml-3 text-[13px] font-medium whitespace-nowrap transition-opacity ${isSidebarOpen ? "opacity-100 duration-200 delay-100" : "opacity-0 duration-150 pointer-events-none"}`}>Platform</span>
+                </Link>
+              </div>
+              {/* Agentic */}
+              <div className="flex items-center px-1.5 py-1">
+                <Link href="/agentic" className="flex items-center text-[var(--pemali-text-secondary)] hover:text-[var(--pemali-text-primary)] transition-colors w-full" title="Agentic">
+                  <div className="w-5 flex items-center justify-center shrink-0"><Bot size={16} /></div>
+                  <span className={`ml-3 text-[13px] font-medium whitespace-nowrap transition-opacity ${isSidebarOpen ? "opacity-100 duration-200 delay-100" : "opacity-0 duration-150 pointer-events-none"}`}>Agentic</span>
                 </Link>
               </div>
               {/* Status */}
@@ -977,6 +1337,7 @@ export default function PemaliDashboard() {
                   onToggleView={() => setObservationView(
                     observationView === "report" ? "process" : "report"
                   )}
+                  onCloseSplitView={() => setAuditMode(false)}
                 />
               </div>
 
@@ -997,7 +1358,7 @@ export default function PemaliDashboard() {
                           messages={messages}
                           onOpenReport={() => {
                             setAuditMode(true);
-                            setObservationView("report");
+                            setObservationView("process");
                           }}
                         />
                         <AnimatePresence>{isTyping && <TypingBubble />}</AnimatePresence>

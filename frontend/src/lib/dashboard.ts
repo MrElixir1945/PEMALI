@@ -1,6 +1,6 @@
 /* Direction: Anthropic Terminal — Warm Editorial Control Room */
 
-export type NodeType = "Manager" | "SubAgent" | "Module";
+export type NodeType = "Manager" | "SubAgent" | "Module" | "Chat";
 export type NodeState =
   | "IDLE"
   | "THINKING"

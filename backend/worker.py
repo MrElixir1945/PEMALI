@@ -8,8 +8,10 @@ import os
 # Ensure project root is in Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Cross-process: worker emits to FastAPI SSE via HTTP POST
-os.environ.setdefault("TELEMETRY_REMOTE_URL", "http://localhost:8000/api/telemetry/publish")
+# Cross-process: worker emits to FastAPI SSE via HTTP POST (fallback to backend env config)
+_backend_url = os.getenv("BACKEND_URL") or os.getenv("NEXT_PUBLIC_BACKEND_URL") or "http://localhost:8080"
+_remote_url = f"{_backend_url.rstrip('/')}/api/telemetry/publish"
+os.environ.setdefault("TELEMETRY_REMOTE_URL", _remote_url)
 
 from sqlalchemy.orm import Session
 from backend.core.database import SessionLocal, init_db, AutonomousTask
@@ -27,23 +29,23 @@ WORKER_CONCURRENCY = 5
 worker_semaphore = asyncio.Semaphore(WORKER_CONCURRENCY)
 
 
-async def execute_autonomous_mind(task: AutonomousTask):
+async def execute_autonomous_mind(task_id: int, priority: int):
     """Agent Otak — full strategic loop: decide cases + spawn runners + self-schedule."""
     async with worker_semaphore:
-        trace_id = f"auto-mind-{task.id}-{int(time.time())}"
+        trace_id = f"auto-mind-{task_id}-{int(time.time())}"
 
         await telemetry.emit(TelemetryEvent(
             trace_id=trace_id, node_id="worker_daemon", node_type="System",
-            state=NodeState.THINKING, narrative=f"Agent Otak diaktifkan untuk siklus otonom #{task.id}",
-            metadata={"task_id": task.id, "priority": task.priority}
+            state=NodeState.THINKING, narrative=f"Agent Otak diaktifkan untuk siklus otonom #{task_id}",
+            metadata={"task_id": task_id, "priority": priority}
         ))
 
         mind = AutonomousMind(trace_id)
         try:
-            overview = await mind.wake(task)
+            overview = await mind.wake(task_id, priority)
 
             with SessionLocal() as db:
-                t = db.query(AutonomousTask).filter(AutonomousTask.id == task.id).first()
+                t = db.query(AutonomousTask).filter(AutonomousTask.id == task_id).first()
                 if t:
                     t.status = "completed"
                     db.commit()
@@ -55,9 +57,9 @@ async def execute_autonomous_mind(task: AutonomousTask):
                          f"{overview.get('success', 0)} sukses, {overview.get('failed', 0)} gagal."
             ))
         except Exception as e:
-            logger.error(f"AutonomousMind task {task.id} failed: {e}")
+            logger.error(f"AutonomousMind task {task_id} failed: {e}")
             with SessionLocal() as db:
-                t = db.query(AutonomousTask).filter(AutonomousTask.id == task.id).first()
+                t = db.query(AutonomousTask).filter(AutonomousTask.id == task_id).first()
                 if t:
                     t.status = "failed"
                     t.retries = (t.retries or 0) + 1
@@ -131,11 +133,25 @@ async def process_autonomous_queue():
                 sys.exit(1)
 
     logger.info("Tick Engine started. Monitoring autonomous_tasks table...")
+    STUCK_TIMEOUT_MINUTES = 30
 
     while True:
         try:
             with SessionLocal() as db:
                 now = datetime.datetime.now(datetime.timezone.utc)
+
+                # Watchdog: recover stuck tasks (created > STUCK_TIMEOUT_MINUTES lalu masih running)
+                stuck_deadline = now - datetime.timedelta(minutes=STUCK_TIMEOUT_MINUTES)
+                stuck_tasks = db.query(AutonomousTask).filter(
+                    AutonomousTask.status == "running",
+                    AutonomousTask.created_at <= stuck_deadline
+                ).all()
+                for st in stuck_tasks:
+                    logger.warning(f"Watchdog: recovering stuck task {st.id} (running > {STUCK_TIMEOUT_MINUTES}m)")
+                    st.status = "failed"
+                    st.last_error = f"Watchdog: task stuck in 'running' for >{STUCK_TIMEOUT_MINUTES} minutes"
+                    st.retries = (st.retries or 0) + 1
+                db.commit()
 
                 # SPRINT-5: Ambil task sorted by priority DESC (urgensi dulu)
                 tasks = db.query(AutonomousTask).filter(
@@ -147,15 +163,21 @@ async def process_autonomous_queue():
                 ).all()
 
                 for task in tasks:
-                    logger.info(f"Triggering Task ID: {task.id} type={task.task_type} priority={task.priority} — {task.intent_description[:80] if task.intent_description else '-'}")
+                    # Capture task attributes to avoid SQLAlchemy DetachedInstanceError in async task
+                    task_id = task.id
+                    task_priority = task.priority
+                    task_type = task.task_type
+                    task_intent = task.intent_description or ""
+
+                    logger.info(f"Triggering Task ID: {task_id} type={task_type} priority={task_priority} — {task_intent[:80] if task_intent else '-'}")
                     task.status = "running"
                     db.commit()
 
                     # SPRINT-5: Routing berdasarkan task_type
-                    if task.task_type == "autonomous":
-                        asyncio.create_task(execute_autonomous_mind(task))
+                    if task_type == "autonomous":
+                        asyncio.create_task(execute_autonomous_mind(task_id, task_priority))
                     else:
-                        asyncio.create_task(execute_autonomous_task(task.id, task.intent_description or ""))
+                        asyncio.create_task(execute_autonomous_task(task_id, task_intent))
 
         except Exception as e:
             logger.error(f"Runtime Loop Error: {e}")
