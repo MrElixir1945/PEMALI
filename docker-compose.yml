@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:15
@@ -9,10 +7,86 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: pemalipass
       POSTGRES_DB: pemali_db
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d pemali_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pemali_net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: pemali_backend
+    restart: always
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - chroma_data:/app/chroma_db
+      - ./backend/.env:/app/backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - pemali_net
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: pemali_worker
+    restart: always
+    command: python backend/worker.py
+    env_file:
+      - .env
+    volumes:
+      - chroma_data:/app/chroma_db
+      - ./backend/.env:/app/backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - pemali_net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        - NEXT_PUBLIC_BACKEND_URL=
+    container_name: pemali_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    depends_on:
+      - backend
+    networks:
+      - pemali_net
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: pemali_tunnel
+    restart: always
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      - frontend
+    networks:
+      - pemali_net
+
+networks:
+  pemali_net:
+    driver: bridge
 
 volumes:
   postgres_data:
+  chroma_data:

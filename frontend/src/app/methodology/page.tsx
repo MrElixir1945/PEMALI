@@ -1,128 +1,174 @@
 "use client";
 
-import { useState } from "react";
 import NavBar from "@/components/NavBar";
 import Footer from "@/components/Footer";
-import { Eye, Brain, FileText, Shield, Scale, Heart, ChevronDown, ChevronUp } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import {
+  Satellite, Search, FileText,
+  ScrollText, TreePine, Users,
+} from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function MethodologyPage() {
-  const [showTechnical, setShowTechnical] = useState(false);
+  const steps = [
+    {
+      icon: Satellite,
+      iconColor: "#4A5E4A",
+      iconBg: "#E8EDE8",
+      title: "1. Pengumpulan Data dari Berbagai Sumber",
+      detail: "PEMALI mengumpulkan data dari satelit NASA (NASA FIRMS untuk mendeteksi titik panas), sensor kualitas udara, data cuaca BMKG, serta berita dan media sosial. Seluruh data diverifikasi silang untuk memastikan akurasi.",
+      image: "/images/methodology/pengumpulan-data.png",
+    },
+    {
+      icon: Search,
+      iconColor: "#4A5670",
+      iconBg: "#E8ECF0",
+      title: "2. Analisis oleh Agen Kecerdasan Buatan",
+      detail: "Manager Agent memecah tugas audit ke beberapa sub-agent yang bekerja secara paralel: geo_agent memeriksa data satelit, water_agent menganalisis kualitas air, fire_agent mendeteksi titik panas, osint_agent memindai berita dan media sosial, serta scheduler_agent mengelola siklus otonom. Kelima sub-agent mengoperasikan 9 modul sensor sesuai keahlian masing-masing.",
+      image: "/images/methodology/analisis oleh agen.png",
+    },
+    {
+      icon: FileText,
+      iconColor: "#6B4A3A",
+      iconBg: "#F0ECE8",
+      title: "3. Validasi dan Koreksi Otomatis",
+      detail: "Apabila ditemukan data yang mencurigakan atau alat mengalami kegagalan, sistem akan melakukan percobaan ulang hingga tiga kali. Jika tetap gagal, Manager Agent akan mengirim agen lain untuk melakukan verifikasi silang sebelum data disatukan.",
+      image: "/images/methodology/validasi-dan-koreksi.png",
+    },
+    {
+      icon: FileText,
+      iconColor: "#5A4A6B",
+      iconBg: "#EEEDF0",
+      title: "4. Penyusunan Laporan Akhir",
+      detail: "Seluruh temuan ditulis dalam laporan berbahasa Indonesia yang naratif dan mudah dipahami. Laporan disimpan di database dan juga diubah menjadi vector embedding agar dapat ditanyakan kembali di kemudian hari melalui fitur tanya jawab pada laporan.",
+      image: "/images/methodology/penyusunan laporan akhir.png",
+    },
+  ];
 
   return (
     <>
       <NavBar />
-      <main className="flex-1 max-w-4xl mx-auto px-8 py-16 w-full text-stone-800">
-        <div className="prose prose-stone max-w-none">
-          <h1 className="font-serif text-5xl font-semibold mb-8 text-stone-900">Cara Kerja Kami</h1>
-          <p className="text-xl text-stone-600 font-light leading-relaxed mb-12">
-            PEMALI bekerja seperti detektif digital. Ia tidak hanya melihat data, tapi 'berpikir' untuk menghubungkan temuan satelit dengan kondisi nyata di lapangan.
-          </p>
-
-          <div className="poleng-divider my-12"></div>
-
-          <h2 className="font-serif text-3xl font-semibold mb-6 italic text-stone-800">Melihat, Berpikir, Melindungi.</h2>
-          <p className="text-lg text-stone-600 mb-12">
-            Sistem kami dirancang agar setiap keputusan yang diambil memiliki alasan yang kuat dan dapat dipertanggungjawabkan.
-          </p>
-          
-          <div className="grid grid-cols-1 gap-8 my-12">
-            <div className="bg-white border border-stone-200 p-8 rounded-[2.5rem] shadow-sm">
-              <div className="flex flex-col md:flex-row items-center md:items-start gap-8 text-center md:text-left">
-                <div className="bg-stone-50 w-16 h-16 rounded-3xl flex items-center justify-center shrink-0 border border-stone-100">
-                  <Eye className="w-8 h-8 text-stone-800" />
-                </div>
-                <div>
-                  <h3 className="font-serif text-2xl font-semibold mb-3 text-stone-900">1. Melihat dari Langit</h3>
-                  <p className="text-stone-600 leading-relaxed">
-                    PEMALI menggunakan mata satelit untuk memantau kesehatan hutan dan lahan di Bali secara langsung dari angkasa. Kami dapat melihat perubahan yang tidak terlihat oleh mata manusia biasa.
-                  </p>
-                </div>
-              </div>
+      <main
+        className="flex-1 min-h-screen"
+        style={{ backgroundColor: "var(--color-background-tertiary, #F0EFEA)" }}
+      >
+        <div className="max-w-4xl mx-auto px-6 lg:px-8 py-16">
+          {/* Header */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+            className="mb-12"
+          >
+            <div className="text-[11px] font-mono uppercase tracking-[0.1em] mb-3" style={{ color: "#888780" }}>
+              Methodology
             </div>
+            <h1 className="font-serif text-[40px] font-light tracking-tight text-[var(--pemali-text-primary)] leading-[1.15] mb-4">
+              Bagaimana Cara Kerja PEMALI?
+            </h1>
+            <p className="text-[14px] text-[var(--pemali-text-secondary)] leading-relaxed max-w-2xl">
+              PEMALI dapat diibaratkan sebagai tim detektif lingkungan yang bekerja selama 24 jam penuh.
+              Mereka memiliki satelit, sensor, and akses terhadap berita — seluruhnya dikelola oleh
+              kecerdasan buatan yang bertindak sebagai koordinator.
+            </p>
+          </motion.div>
 
-            <div className="bg-white border border-stone-200 p-8 rounded-[2.5rem] shadow-sm">
-              <div className="flex flex-col md:flex-row items-center md:items-start gap-8 text-center md:text-left">
-                <div className="bg-stone-50 w-16 h-16 rounded-3xl flex items-center justify-center shrink-0 border border-stone-100">
-                  <Brain className="w-8 h-8 text-stone-800" />
-                </div>
-                <div>
-                  <h3 className="font-serif text-2xl font-semibold mb-3 text-stone-900">2. Menganalisis Masalah</h3>
-                  <p className="text-stone-600 leading-relaxed">
-                    AI akan membandingkan apa yang ia lihat dengan aturan yang berlaku untuk memastikan tidak ada pelanggaran alam. Ia 'menghubungkan titik-titik' data untuk menemukan anomali.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white border border-stone-200 p-8 rounded-[2.5rem] shadow-sm">
-              <div className="flex flex-col md:flex-row items-center md:items-start gap-8 text-center md:text-left">
-                <div className="bg-stone-50 w-16 h-16 rounded-3xl flex items-center justify-center shrink-0 border border-stone-100">
-                  <FileText className="w-8 h-8 text-stone-800" />
-                </div>
-                <div>
-                  <h3 className="font-serif text-2xl font-semibold mb-3 text-stone-900">3. Memberikan Laporan</h3>
-                  <p className="text-stone-600 leading-relaxed">
-                    Setelah yakin, sistem akan otomatis membuat rangkuman audit yang siap digunakan oleh pihak berwenang. Tidak ada data yang terlewatkan.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-stone-900 rounded-[2.5rem] p-10 mb-20 text-white shadow-xl shadow-stone-200">
-            <button 
-              onClick={() => setShowTechnical(!showTechnical)}
-              className="w-full flex items-center justify-between text-white/50 hover:text-white transition-colors"
-            >
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Technical Deep Dive</span>
-              <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-white/20">
-                {showTechnical ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </div>
-            </button>
-            
-            <AnimatePresence>
-              {showTechnical && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
+          {/* Steps */}
+          <div className="flex flex-col gap-4 mb-16">
+            {steps.map((step, i) => (
+              <motion.div
+                key={step.title}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: i * 0.08 }}
+                className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-6 flex items-start gap-5"
+              >
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 mt-0.5 overflow-hidden"
+                  style={{ backgroundColor: step.iconBg }}
                 >
-                  <div className="pt-8 text-sm text-stone-300 leading-relaxed border-t border-white/10 mt-6 font-light">
-                    Sistem berbasis <strong>ReAct (Reasoning & Acting)</strong>. Setiap audit melalui fase observasi spasial menggunakan integrasi citra satelit <strong>Sentinel-2</strong> untuk mendapatkan data <strong>NDVI</strong> (indeks kesehatan vegetasi) terkini. AI memvalidasi hipotesis kerusakan lingkungan berdasarkan observasi tersebut sebelum melakukan eksekusi manifest modul melalui Unified Tool Interface.
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  {step.image ? (
+                    <img src={step.image} alt={step.title} className="w-full h-full object-cover" />
+                  ) : (
+                    <step.icon size={26} style={{ color: step.iconColor }} strokeWidth={1.5} />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[14px] font-medium text-[var(--pemali-text-primary)] mb-1.5">
+                    {step.title}
+                  </h3>
+                  <p className="text-[12px] text-[var(--pemali-text-secondary)] leading-relaxed">
+                    {step.detail}
+                  </p>
+                </div>
+              </motion.div>
+            ))}
           </div>
 
-          <h2 className="font-serif text-3xl font-semibold mb-8 text-center text-stone-900">Menjaga Keseimbangan Tradisi</h2>
-          <p className="text-center text-lg mb-12 text-stone-500 max-w-2xl mx-auto font-light">Kami memastikan teknologi tidak merusak tradisi. Algoritma kami dirancang untuk menjaga keseimbangan sesuai nilai leluhur.</p>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-20">
-            <div className="text-center group">
-              <div className="bg-stone-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 border border-stone-100 group-hover:scale-110 transition-transform">
-                <Heart className="w-6 h-6 text-red-700" />
-              </div>
-              <h4 className="font-serif text-xl font-semibold mb-3 text-stone-800">Parahyangan</h4>
-              <p className="text-xs text-stone-400 leading-relaxed font-light">Menjaga kesucian area pura agar tetap terjaga dari pembangunan ilegal.</p>
+          {/* THK Section */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.4 }}
+          >
+            <div className="flex items-center gap-2 mb-5">
+              <span className="text-[11px] font-mono uppercase tracking-[0.1em]" style={{ color: "#888780" }}>
+                Selaras dengan Filosofi Tri Hita Karana
+              </span>
             </div>
-            <div className="text-center group">
-              <div className="bg-stone-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 border border-stone-100 group-hover:scale-110 transition-transform">
-                <Scale className="w-6 h-6 text-stone-600" />
-              </div>
-              <h4 className="font-serif text-xl font-semibold mb-3 text-stone-800">Pawongan</h4>
-              <p className="text-xs text-stone-400 leading-relaxed font-light">Menjaga keharmonisan warga dengan memastikan keadilan tata ruang.</p>
+            <p className="text-[12px] text-[var(--pemali-text-secondary)] leading-relaxed mb-6">
+              PEMALI tidak hanya mengejar data teknis. Setiap laporan audit senantiasa mempertimbangkan tiga keseimbangan kehidupan masyarakat Bali:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                {
+                  icon: TreePine, color: "#4A5E4A", bg: "#E8EDE8",
+                  title: "Parahyangan",
+                  sub: "Hubungan dengan Tuhan",
+                  desc: "Menjaga situs suci dan pura dari pembangunan ilegal. Satelit memantau kawasan sekitar pura agar tidak terjadi pelanggaran tata ruang.",
+                  image: "/images/methodology/parahyangan .png",
+                },
+                {
+                  icon: Users, color: "#4A5670", bg: "#E8ECF0",
+                  title: "Pawongan",
+                  sub: "Hubungan dengan Sesama",
+                  desc: "Seluruh data audit bersifat transparan dan dapat diakses oleh masyarakat. Warga desa adat berhak mengetahui kondisi lingkungan di wilayahnya masing-masing.",
+                  image: "/images/methodology/pawongan .png",
+                },
+                {
+                  icon: ScrollText, color: "#6B4A3A", bg: "#F0ECE8",
+                  title: "Palemahan",
+                  sub: "Hubungan dengan Alam",
+                  desc: "Pemantauan berkelanjutan terhadap hutan mangrove, subak, sungai, dan pantai. Deteksi dini memungkinkan pencegahan kerusakan lingkungan sebelum meluas.",
+                  image: "/images/methodology/palemahan.png",
+                },
+              ].map((item) => (
+                <div
+                  key={item.title}
+                  className="bg-white border-[0.5px] border-[var(--pemali-border)] rounded-xl p-5"
+                >
+                  <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 overflow-hidden"
+                    style={{ backgroundColor: item.bg }}
+                  >
+                    {item.image ? (
+                      <img src={item.image} alt={item.title} className="w-full h-full object-cover" />
+                    ) : (
+                      <item.icon size={22} style={{ color: item.color }} strokeWidth={1.5} />
+                    )}
+                  </div>
+                  <div className="text-[10px] font-mono tracking-wider mb-0.5" style={{ color: "#B4B2A9" }}>
+                    {item.sub}
+                  </div>
+                  <h4 className="text-[13px] font-medium text-[var(--pemali-text-primary)] mb-2">
+                    {item.title}
+                  </h4>
+                  <p className="text-[11px] text-[var(--pemali-text-secondary)] leading-relaxed">
+                    {item.desc}
+                  </p>
+                </div>
+              ))}
             </div>
-            <div className="text-center group">
-              <div className="bg-stone-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 border border-stone-100 group-hover:scale-110 transition-transform">
-                <Shield className="w-6 h-6 text-green-800" />
-              </div>
-              <h4 className="font-serif text-xl font-semibold mb-3 text-stone-800">Palemahan</h4>
-              <p className="text-xs text-stone-400 leading-relaxed font-light">Menjaga kelestarian alam agar tetap hijau dan asri untuk masa depan.</p>
-            </div>
-          </div>
+          </motion.div>
         </div>
       </main>
       <Footer />

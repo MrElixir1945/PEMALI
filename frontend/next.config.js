@@ -1,11 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  allowedDevOrigins: [
+    "localhost",
+    "127.0.0.1",
+    "10.10.10.10",
+  ],
   async rewrites() {
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
     return [
       {
-        source: '/api/:path*',
-        destination: `${backendUrl}/api/:path*`, // Proxy to Backend
+        source: "/api/:path*",
+        destination: "http://backend:8080/api/:path*",
       },
     ];
   },
