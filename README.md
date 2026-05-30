@@ -415,7 +415,7 @@ docker compose up -d --build
 
 ## License
 
-MIT
+GNU General Public License v3.0 (GPLv3)
 
 ---
 
